@@ -2,8 +2,6 @@ from dataclasses import dataclass, field
 from typing import List, Dict
 from enum import Enum
 import random
-import yaml
-import json
 
 class DayOfWeek(Enum):
     MONDAY = "Mon"
@@ -127,6 +125,7 @@ def volunteer_satisfies(volunteer: Volunteer, shift: Shift, day: DayOfWeek) -> b
     
     return True
 
+
 def assign_days_offs(shifts: List[Shift], volunteers: List[Volunteer]):
     """
     TODO: days off are being concentrated in a few days which is ok for Saturday and Sunday
@@ -180,14 +179,3 @@ def min_needed_level3(shifts: List[Shift], day: DayOfWeek) -> int:
 def max_vols_off(shifts: List[Shift], day: DayOfWeek, total_vols: int) -> int:
     """how many volunteers can get day off this day"""
     return total_vols - min_needed_level3(shifts, day)
-
-def main():
-  with open("shifts.yml") as f:
-      shifts = [Shift(**s) for s in yaml.safe_load(f)]
-
-  with open("volunteers.yml") as f:
-      volunteers = [Volunteer(**v) for v in yaml.safe_load(f)]
-
-  print(generate_schedule(shifts, volunteers))
-
-main()
