@@ -1,7 +1,9 @@
 from dataclasses import dataclass, field
 from typing import List, Dict
 from enum import Enum
+import random
 import yaml
+import json
 
 class DayOfWeek(Enum):
     MONDAY = "Mon"
@@ -35,20 +37,22 @@ class Volunteer:
 
 @dataclass
 class DayAssignment:
-    shift_to_people: Dict[str, List[str]]
+    shift_to_people: Dict[str, List[Volunteer]]
 
 @dataclass
 class Schedule:
+    # todo: somehow can we access days without `.day`?
     days: Dict[DayOfWeek, DayAssignment]
 
 """
 Consider:
 - [x] Shift operational days
-- [] if no 2 days off are assigned to volunteer, we must assign randomly
+- [x] if no 2 days off are assigned to volunteer, we must assign randomly
     with a preference of assigning everyone to Sunday after assigning all people
     to number 3 importance shifts of Sunday. And then assign volunteers days off
     to random days of the week (all volunteers hsould have 2 days off)
 - [] handle error if no volunteers fitted
+- [] for remaining volunteers without shifts assigned, assign them to shift Others
 - [] consider people with fixed shifts ("Misc: Construction, Arts and others..." shift also) that
     will do the same all the work days
 - [] verify if all shifts were filled
@@ -57,45 +61,125 @@ Consider:
 def generate_schedule(shifts: List[Shift], volunteers: List[Volunteer]) -> Schedule:
     shifts_by_importance = sorted(shifts, key=lambda s: s.importance, reverse=True)
     schedule = Schedule({day: DayAssignment({}) for day in list(DayOfWeek)})
-    # todo: sort volunteers randomly
+    random.shuffle(volunteers)
 
-    # todo: how to handle volunteers assignment of days off?
-    # pre-assign volunteers days off when not specified by checking first how many people
-    # are needed for level 3 importance shifts on each day, giving preference to assigning people
-    # to be off on sunday
+    # 1. assign days off randomly, all must have 2 days off
+    assign_days_offs(shifts, volunteers)
+
     for day in list(DayOfWeek):
         for shift in shifts_by_importance:
             if day.name in shift.unoperational_days:
                 continue
 
-            fitted_volunteers =  match_volunteers(shift, volunteers, day) 
-            # TODO
-    pass
+            eligible =  eligible_vols_for_shift(shift, volunteers, day) 
 
+            for vol in eligible: 
+                assign_volunteer_to_shift(schedule, day, shift, vol)
+
+            if len(eligible) < shift.min_people:
+                raise RuntimeError(f"Shift {shift.name} needs {shift.min_people} people, but only {len(eligible)} were found")
+
+    return schedule
 
 """
-[] Min people needed for the shift
-[] return error if no volunteers were filled
+[x] Min people needed for the shift
+[x] return error if no volunteers were filled
 """
-def match_volunteers(
+def eligible_vols_for_shift(
     shift: Shift, volunteers: List[Volunteer], 
     day: DayOfWeek) -> List[Volunteer]:
-    # TODO
-    pass
+
+    n = 0
+    eligible : List[Volunteer] = []
+    for vol in volunteers:
+        if volunteer_satisfies(vol, shift, day):
+            n += 1
+            eligible.append(vol)
+
+        if n >= shift.min_people:
+            break
+
+    if n < shift.min_people:
+        raise RuntimeError(f"Shift {shift.name} needs {shift.min_people} people, but only {n} were found")
+
+    return eligible
+
+def assign_volunteer_to_shift(schedule: Schedule, day: DayOfWeek, shift: Shift, vol: Volunteer):
+    if shift.name not in schedule.days[day].shift_to_people:
+        schedule.days[day].shift_to_people[shift.name] = [vol]
+    else:
+        schedule.days[day].shift_to_people[shift.name].append(vol)
 
 """
 Requirements:
 
-[] Check volunteers' days off
+[x] Check volunteers' days off
 [] Preferences of shifts
 
 Next versions:
 
 [] Volunteers with fixed shifts
 """
-def volunteer_satisfies(volunteer: Volunteer, shift: Shift, day: DayOfWeek) -> Bool:
+def volunteer_satisfies(volunteer: Volunteer, shift: Shift, day: DayOfWeek) -> bool:
     # TODO
+    if day.value in volunteer.days_off:
+        return False
+    
+    return True
+
+def assign_days_offs(shifts: List[Shift], volunteers: List[Volunteer]):
+    """
+    TODO: days off are being concentrated in a few days which is ok for Saturday and Sunday
+    but for weekdays, we need to distribute them randomly
+    """
+    random.shuffle(volunteers)
+
+    # Sunday first
+    assign_weekend_day_off(shifts, DayOfWeek.SUNDAY, volunteers)
+
+    # Saturday
+    assign_weekend_day_off(shifts, DayOfWeek.SATURDAY, volunteers)
+
+    # weekdays (todo randomize)
+    days: List[DayOfWeek] = [DayOfWeek.MONDAY, DayOfWeek.TUESDAY, DayOfWeek.WEDNESDAY, DayOfWeek.THURSDAY, DayOfWeek.FRIDAY]
+    random.shuffle(days)
+    for day in days:
+        assign_weekend_day_off(shifts, day, volunteers)
+
+    for v in volunteers:
+        if len(v.days_off) != 2:
+            raise RuntimeError(f"{v.name} ended with {len(v.days_off)} days off (expected 2)")
+
+def assign_weekend_day_off(shifts: List[Shift], day: DayOfWeek, volunteers: List[Volunteer]):
+    off_count = 0
+    max_off_day = max(0, max_vols_off(shifts, day, len(volunteers)))
+
+    for vol in volunteers:
+        if len(vol.days_off) == 2:
+            continue
+
+        if day.name not in vol.days_off:
+            vol.days_off.append(day.name)
+
+        off_count += 1
+
+        if off_count >= max_off_day:
+            break
     pass
+
+def min_needed_level3(shifts: List[Shift], day: DayOfWeek) -> int:
+    """min number of volunteers for level3 shifts"""
+    n = 0
+    for shift in shifts:
+        if day.name in shift.unoperational_days:
+            continue
+        if shift.importance == 3:
+            n += shift.min_people
+    return n
+
+def max_vols_off(shifts: List[Shift], day: DayOfWeek, total_vols: int) -> int:
+    """how many volunteers can get day off this day"""
+    return total_vols - min_needed_level3(shifts, day)
 
 def main():
   with open("shifts.yml") as f:
@@ -104,8 +188,6 @@ def main():
   with open("volunteers.yml") as f:
       volunteers = [Volunteer(**v) for v in yaml.safe_load(f)]
 
-  print(shifts)
-  print("AND")
-  print(volunteers)
+  print(generate_schedule(shifts, volunteers))
 
 main()

@@ -1,15 +1,25 @@
 - name: Breakfast
+  day_phase: "morning"
   min_people: 2
   max_people: 4
   importance: 3
 
 - name: Lunch
-  min_people: 3
+  min_people: 2
+  day_phase: "morning"
   max_people: 5
   importance: 3
 
 - name: Agriculture
-  min_people: 3
+  min_people: 1
+  day_phase: "morning"
+  max_people: 5
+  importance: 1
+  unoperational_days: ["Sun"]
+
+- name: Others (Construction, Arts...)
+  min_people: 1
+  day_phase: "morning"
   max_people: 5
   importance: 1
   unoperational_days: ["Sun"]

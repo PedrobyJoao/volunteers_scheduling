@@ -1,8 +1,24 @@
-- name: Alice
-  desired_shifts: ["Kitchen", "Cleaning"]
-  undesired_shifts: ["Agriculture"]
-  days_off: ["Tue", "Wed"]
+- name: Carol
+  desired_shifts: ["Agriculture", "Cleaning"]
+  days_off: ["Mon", "Thu"]
 
-- name: Bob
+- name: David
+  desired_shifts: ["Kitchen", "Misc"]
+  days_off: ["Sun", "Fri"]
+
+- name: Emma
+  desired_shifts: ["Cleaning"]
+  days_off: ["Wed", "Sat"]
+
+- name: Frank
+  desired_shifts: ["Agriculture", "Kitchen"]
+  days_off: ["Tue", "Sun"]
+
+- name: Grace
+  desired_shifts: ["Misc", "Cleaning"]
+  days_off: ["Thu", "Fri"]
+
+- name: Henry
   desired_shifts: ["Kitchen"]
-  days_off: ["Sun", "Sat"]
+  days_off: ["Mon", "Sat"]
+
