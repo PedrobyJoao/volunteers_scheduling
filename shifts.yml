@@ -1,0 +1,15 @@
+- name: Breakfast
+  min_people: 2
+  max_people: 4
+  importance: 3
+
+- name: Lunch
+  min_people: 3
+  max_people: 5
+  importance: 3
+
+- name: Agriculture
+  min_people: 3
+  max_people: 5
+  importance: 1
+  unoperational_days: ["Sun"]

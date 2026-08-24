@@ -1,0 +1,8 @@
+- name: Alice
+  desired_shifts: ["Kitchen", "Cleaning"]
+  undesired_shifts: ["Agriculture"]
+  days_off: ["Tue", "Wed"]
+
+- name: Bob
+  desired_shifts: ["Kitchen"]
+  days_off: ["Sun", "Sat"]
