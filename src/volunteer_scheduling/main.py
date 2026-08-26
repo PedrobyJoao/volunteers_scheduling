@@ -1,5 +1,5 @@
 import yaml
-import schedule
+from . import schedule
 
 
 def main():
