@@ -80,7 +80,7 @@ def generate_schedule(shifts: List[Shift], volunteers: List[Volunteer]) -> Sched
             if day.name in shift.unoperational_days:
                 continue
 
-            eligible =  eligible_vols_for_shift(schedule, shift, volunteers, day) 
+            eligible =  eligible_vols_for_shift(shift, volunteers, day) 
 
             for vol in eligible: 
                 assign_volunteer_to_shift(schedule, day, shift, vol)
