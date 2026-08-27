@@ -50,7 +50,6 @@ class DayAssignment:
 
 @dataclass
 class Schedule:
-    # todo: somehow can we access days without `.day`?
     days: Dict[DayOfWeek, DayAssignment]
 
 """
@@ -93,7 +92,6 @@ def generate_schedule(shifts: List[Shift], volunteers: List[Volunteer]) -> Sched
 """
 [x] Min people needed for the shift
 [x] return error if no volunteers were filled
-[] only one shift per phase of day
 """
 def eligible_vols_for_shift(
     shift: Shift, volunteers: List[Volunteer], 
@@ -124,8 +122,10 @@ def assign_volunteer_to_shift(schedule: Schedule, day: DayOfWeek, shift: Shift, 
 Requirements:
 
 [x] Check volunteers' days off
-[] Preferences of shifts
+[] only one shift per phase of day
+[] two shifts per day per volunteer
 [] volunteer preferences of days phase
+[] Preferences of shifts
 
 Next versions:
 
