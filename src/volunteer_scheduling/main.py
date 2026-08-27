@@ -9,7 +9,7 @@ def main():
 
   with open("volunteers.yml") as f:
       volunteers = [schedule.Volunteer(**v) for v in yaml.safe_load(f)]
-
+  
   week_schedule = schedule.generate_schedule(shifts, volunteers)
   sheets.write_pretty_schedule_xlsx(week_schedule)
 

@@ -1,178 +1,362 @@
-"""
-pretty_schedule_xlsx.py
+from pathlib import Path
+from typing import Dict, List
 
-Create a nicely formatted XLSX from a Schedule instance (single sheet).
-- Expects a `schedule` module in the same directory that defines:
-    - Schedule: with .days: Dict[DayOfWeek, DayAssignment]
-    - DayOfWeek: Enum with ordered days (MONDAY..SUNDAY) and readable .value (e.g. "Mon")
-    - DayAssignment.shift_to_people: Dict[str, List[Volunteer]]
-    - Volunteer objects expose .name (or volunteers may be strings)
-
-Requires:
-    pip install openpyxl
-"""
-
-from typing import List, Dict, Any
 from openpyxl import Workbook
-from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
-# Local import of your types (adjust module name if needed)
-# Assumes schedule.py is next to this file
-from .schedule import Schedule, DayOfWeek  # type: ignore
+from .schedule import (
+    DayOfWeek,
+    PhaseOfDay,
+    Schedule,
+    Shift,
+    Volunteer,
+)
 
-# Styling constants
-HEADER_FILL = PatternFill("solid", fgColor="FFD3D3D3")  # light gray
-ALT_FILL_1 = PatternFill("solid", fgColor="FFFFFFFF")   # white
-ALT_FILL_2 = PatternFill("solid", fgColor="FFF7FBFF")   # very light blue
-BORDER_SIDE = Side(style="thin", color="FFCCCCCC")
-CELL_BORDER = Border(left=BORDER_SIDE, right=BORDER_SIDE, top=BORDER_SIDE, bottom=BORDER_SIDE)
-HEADER_FONT = Font(bold=True, size=12)
-SHIFT_FONT = Font(bold=True, size=11)
-BASE_FONT_SIZE = 11
 
-def _vol_name(v: Any) -> str:
-    """Return volunteer's name from object or string."""
-    if v is None:
-        return ""
-    name = getattr(v, "name", None)
-    if isinstance(name, str):
-        return name
-    return str(v)
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
 
-def _collect_shift_names(schedule: Schedule) -> List[str]:
-    """Collect distinct shift names across the week in stable order (first appearance)."""
-    shift_names: List[str] = []
-    for d in list(DayOfWeek):
-        assignment = schedule.days.get(d)
-        if not assignment:
+SHIFT_COLUMN_WIDTH = 30
+DAY_COLUMN_WIDTH = 22
+
+HEADER_ROW_HEIGHT = 30
+PHASE_ROW_HEIGHT = 24
+
+MIN_SHIFT_ROW_HEIGHT = 30
+LINE_HEIGHT = 15
+MAX_SHIFT_ROW_HEIGHT = 110
+
+NORMAL_FONT_SIZE = 11
+COMPACT_FONT_SIZE = 10
+
+HEADER_FILL = PatternFill("solid", fgColor="4472C4")
+PHASE_FILL = PatternFill("solid", fgColor="D9EAF7")
+SHIFT_FILL = PatternFill("solid", fgColor="F2F2F2")
+CELL_FILL = PatternFill("solid", fgColor="FFFFFF")
+
+WHITE_FONT = Font(
+    name="Calibri",
+    size=12,
+    bold=True,
+    color="FFFFFF",
+)
+
+PHASE_FONT = Font(
+    name="Calibri",
+    size=12,
+    bold=True,
+)
+
+SHIFT_FONT = Font(
+    name="Calibri",
+    size=11,
+    bold=True,
+)
+
+CELL_FONT = Font(
+    name="Calibri",
+    size=NORMAL_FONT_SIZE,
+)
+
+COMPACT_CELL_FONT = Font(
+    name="Calibri",
+    size=COMPACT_FONT_SIZE,
+)
+
+BORDER_SIDE = Side(
+    style="thin",
+    color="D9D9D9",
+)
+
+CELL_BORDER = Border(
+    left=BORDER_SIDE,
+    right=BORDER_SIDE,
+    top=BORDER_SIDE,
+    bottom=BORDER_SIDE,
+)
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _volunteer_names(volunteers: List[Volunteer]) -> str:
+    """Return volunteer names separated by newlines for display in Excel."""
+    return "\n".join(volunteer.name for volunteer in volunteers)
+
+
+def _phase_title(phase: PhaseOfDay) -> str:
+    """Return the human-readable title for a phase of the day."""
+    return {
+        PhaseOfDay.EARLY_MORNING: "Early morning",
+        PhaseOfDay.LATE_MORNING: "Late morning",
+        PhaseOfDay.AFTERNOON: "Afternoon",
+        PhaseOfDay.EVENING: "Evening",
+    }[phase]
+
+
+def _collect_shifts(schedule: Schedule) -> List[Shift]:
+    """
+    Collect all distinct Shift objects used by the schedule.
+
+    Shifts are returned in their first-seen order. Since Shift is frozen and
+    therefore hashable, the objects themselves are used for identity.
+    """
+    shifts: List[Shift] = []
+
+    for day in DayOfWeek:
+        assignment = schedule.days.get(day)
+
+        if assignment is None:
             continue
-        for sname in assignment.shift_to_people.keys():
-            if sname not in shift_names:
-                shift_names.append(sname)
-    return shift_names
 
-def _build_grid(schedule: Schedule) -> List[List[str]]:
-    """Return rows (list of lists) ready to be written: header + rows per shift."""
-    shift_names = _collect_shift_names(schedule)
-    header = ["Shift / Day"] + [d.value for d in list(DayOfWeek)]
-    rows: List[List[str]] = [header]
+        for shift in assignment.shift_to_people:
+            if shift not in shifts:
+                shifts.append(shift)
 
-    # Build day->shift->names map
-    day_shift_map: Dict[str, Dict[str, List[str]]] = {}
-    for d in list(DayOfWeek):
-        assignment = schedule.days.get(d)
-        mapping: Dict[str, List[str]] = {}
-        if assignment:
-            for sname, vols in assignment.shift_to_people.items():
-                mapping[sname] = [_vol_name(v) for v in vols]
-        day_shift_map[d.value] = mapping
+    return shifts
 
-    for s in shift_names:
-        row = [s]
-        for d in list(DayOfWeek):
-            names = day_shift_map.get(d.value, {}).get(s, [])
-            # join with newline for nicer wrapping in Excel
-            cell = "\n".join(n for n in names if n)
-            row.append(cell)
-        rows.append(row)
-    return rows
 
-def _apply_sheet_styles(ws: Worksheet, rows: List[List[str]]):
-    """Apply formatting: headers, fonts, column widths, row heights, colors, borders, wrapping."""
-    max_cols = max(len(r) for r in rows) if rows else 1
-    # Column widths: first column wider (shift name), others comfortable for ~5 names
-    col_widths = [35] + [22] * (max_cols - 1)
-    for i, w in enumerate(col_widths, start=1):
-        ws.column_dimensions[get_column_letter(i)].width = w
+def _group_shifts_by_phase(schedule: Schedule) -> Dict[PhaseOfDay, List[Shift]]:
+    """Group shifts by their Shift.day_phase."""
+    groups: Dict[PhaseOfDay, List[Shift]] = {
+        phase: []
+        for phase in PhaseOfDay
+    }
 
-    # Write cells and style them
-    for r_idx, row in enumerate(rows, start=1):
-        # choose alternate fill for content rows (not header)
-        alt_fill = ALT_FILL_1 if (r_idx % 2 == 0) else ALT_FILL_2
-        for c_idx in range(1, max_cols + 1):
-            cell = ws.cell(row=r_idx, column=c_idx)
-            value = row[c_idx - 1] if c_idx - 1 < len(row) else ""
-            cell.value = value
+    for shift in _collect_shifts(schedule):
+        groups[shift.day_phase].append(shift)
 
-            # header row styling
-            if r_idx == 1:
-                cell.fill = HEADER_FILL
-                cell.font = HEADER_FONT
-                cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-                cell.border = CELL_BORDER
-            else:
-                # first column is shift name
-                if c_idx == 1:
-                    cell.font = SHIFT_FONT
-                    cell.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
-                else:
-                    # body cells: adjust font size depending on number of lines (names)
-                    lines = (str(value).count("\n") + 1) if value else 0
-                    if lines <= 1:
-                        fsize = BASE_FONT_SIZE
-                    elif lines <= 3:
-                        fsize = BASE_FONT_SIZE - 1
-                    elif lines <= 5:
-                        fsize = BASE_FONT_SIZE - 2
-                    else:
-                        fsize = BASE_FONT_SIZE - 3
-                    # set font
-                    cell.font = Font(size=fsize)
-                    cell.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
-                cell.fill = alt_fill
-                cell.border = CELL_BORDER
+    return groups
 
-        # Row height: base plus increments per number of lines in the widest cell of the row (excluding shift column)
-        if r_idx == 1:
-            ws.row_dimensions[r_idx].height = 28
+
+def _build_assignment_map(
+    schedule: Schedule,
+) -> Dict[DayOfWeek, Dict[Shift, List[Volunteer]]]:
+    """Return the schedule assignments keyed by day and Shift object."""
+    return {
+        day: (
+            schedule.days[day].shift_to_people
+            if day in schedule.days
+            else {}
+        )
+        for day in DayOfWeek
+    }
+
+
+def _calculate_row_height(value: str) -> float:
+    """Calculate a suitable row height based on the number of volunteer names."""
+    if not value:
+        return MIN_SHIFT_ROW_HEIGHT
+
+    number_of_lines = value.count("\n") + 1
+
+    height = max(
+        MIN_SHIFT_ROW_HEIGHT,
+        number_of_lines * LINE_HEIGHT + 10,
+    )
+
+    return min(height, MAX_SHIFT_ROW_HEIGHT)
+
+
+# ---------------------------------------------------------------------------
+# Worksheet styling
+# ---------------------------------------------------------------------------
+
+def _setup_columns(ws: Worksheet) -> None:
+    """Configure column widths for the schedule."""
+    ws.column_dimensions["A"].width = SHIFT_COLUMN_WIDTH
+
+    for column_index, _day in enumerate(DayOfWeek, start=2):
+        column_letter = get_column_letter(column_index)
+        ws.column_dimensions[column_letter].width = DAY_COLUMN_WIDTH
+
+
+def _write_header(ws: Worksheet) -> None:
+    """Write the spreadsheet header row."""
+    ws.cell(row=1, column=1, value="Shift")
+
+    for column_index, day in enumerate(DayOfWeek, start=2):
+        ws.cell(
+            row=1,
+            column=column_index,
+            value=day.value,
+        )
+
+    for column_index in range(1, len(DayOfWeek) + 2):
+        cell = ws.cell(row=1, column=column_index)
+
+        cell.fill = HEADER_FILL
+        cell.font = WHITE_FONT
+        cell.border = CELL_BORDER
+        cell.alignment = Alignment(
+            horizontal="center",
+            vertical="center",
+        )
+
+    ws.row_dimensions[1].height = HEADER_ROW_HEIGHT
+
+
+def _write_phase_row(
+    ws: Worksheet,
+    row_number: int,
+    phase: PhaseOfDay,
+) -> None:
+    """Write and style a phase separator row."""
+    last_column = len(DayOfWeek) + 1
+
+    ws.merge_cells(
+        start_row=row_number,
+        start_column=1,
+        end_row=row_number,
+        end_column=last_column,
+    )
+
+    cell = ws.cell(
+        row=row_number,
+        column=1,
+        value=_phase_title(phase),
+    )
+
+    cell.fill = PHASE_FILL
+    cell.font = PHASE_FONT
+    cell.border = CELL_BORDER
+    cell.alignment = Alignment(
+        horizontal="left",
+        vertical="center",
+    )
+
+    ws.row_dimensions[row_number].height = PHASE_ROW_HEIGHT
+
+
+def _write_shift_row(
+    ws: Worksheet,
+    row_number: int,
+    shift: Shift,
+    assignments: Dict[DayOfWeek, Dict[Shift, List[Volunteer]]],
+) -> None:
+    """Write one Shift row and its volunteer assignments."""
+    shift_cell = ws.cell(
+        row=row_number,
+        column=1,
+        value=shift.name,
+    )
+
+    shift_cell.fill = SHIFT_FILL
+    shift_cell.font = SHIFT_FONT
+    shift_cell.border = CELL_BORDER
+    shift_cell.alignment = Alignment(
+        horizontal="left",
+        vertical="center",
+        wrap_text=True,
+    )
+
+    max_lines = 1
+
+    for column_index, day in enumerate(DayOfWeek, start=2):
+        volunteers = assignments[day].get(shift, [])
+        names = _volunteer_names(volunteers)
+
+        cell = ws.cell(
+            row=row_number,
+            column=column_index,
+            value=names,
+        )
+
+        cell.fill = CELL_FILL
+        cell.border = CELL_BORDER
+        cell.alignment = Alignment(
+            horizontal="left",
+            vertical="center",
+            wrap_text=True,
+        )
+
+        line_count = names.count("\n") + 1 if names else 1
+        max_lines = max(max_lines, line_count)
+
+        if len(volunteers) > 5:
+            cell.font = COMPACT_CELL_FONT
         else:
-            max_lines = 1
-            for c_idx in range(2, max_cols + 1):
-                cell_val = str(row[c_idx - 1]) if c_idx - 1 < len(row) else ""
-                lines = cell_val.count("\n") + 1 if cell_val else 1
-                if lines > max_lines:
-                    max_lines = lines
-            # estimate: 15-18 pixels per line, add padding
-            height = 18 + (max_lines * 14)
-            # clamp to a reasonable max to avoid enormous rows
-            height = max(18, min(height, 200))
-            ws.row_dimensions[r_idx].height = height
+            cell.font = CELL_FONT
 
-    # Freeze header row and first column
-    ws.freeze_panes = "B2"
+    ws.row_dimensions[row_number].height = min(
+        MAX_SHIFT_ROW_HEIGHT,
+        max(MIN_SHIFT_ROW_HEIGHT, max_lines * LINE_HEIGHT + 10),
+    )
 
-def write_pretty_schedule_xlsx(schedule: Schedule, out_path: str = "schedule_pretty.xlsx", sheet_title: str = "Weekly Schedule"):
+
+# ---------------------------------------------------------------------------
+# Main exporter
+# ---------------------------------------------------------------------------
+
+def write_pretty_schedule_xlsx(
+    schedule: Schedule,
+    output_path: str | Path = "schedule.xlsx",
+    sheet_title: str = "Weekly Schedule",
+) -> None:
     """
-    Main entrypoint.
-    - schedule: Schedule instance
-    - out_path: path to write .xlsx
-    - sheet_title: worksheet name
+    Generate a formatted XLSX file from a Schedule.
+
+    The spreadsheet is organized as:
+
+        Shift | Mon | Tue | Wed | Thu | Fri | Sat | Sun
+
+        Early morning
+        Shift A
+        Shift B
+
+        Late morning
+        Shift C
+        Shift D
+
+        Afternoon
+        ...
+
+        Evening
+        ...
+
+    Volunteer names inside a cell are separated by newlines.
     """
-    rows = _build_grid(schedule)
+    output_path = Path(output_path)
 
-    wb = Workbook()
-    ws = wb.active
-    ws.title = sheet_title
+    workbook = Workbook()
+    worksheet = workbook.create_sheet(title=sheet_title)
 
-    # write data and apply styles
-    _apply_sheet_styles(ws, rows)
+    _setup_columns(worksheet)
+    _write_header(worksheet)
 
-    # Save file
-    wb.save(out_path)
-    print(f"Wrote schedule to: {out_path}")
+    assignments = _build_assignment_map(schedule)
+    shifts_by_phase = _group_shifts_by_phase(schedule)
 
-# -------------------------
-# Example usage (optional)
-# -------------------------
-if __name__ == "__main__":
-    # Attempt to obtain a Schedule instance from your schedule module.
-    # Replace this with whatever you already have (e.g., call generate_schedule()).
-    try:
-        from schedule import generate_schedule  # type: ignore
-        schedule_obj = generate_schedule([], [])  # adapt as needed in your project
-    except Exception:
-        raise RuntimeError("Please construct a Schedule instance and call write_pretty_schedule_xlsx(schedule_obj, out_path).")
+    current_row = 2
 
-    write_pretty_schedule_xlsx(schedule_obj, "schedule_pretty.xlsx")
+    for phase in PhaseOfDay:
+        shifts = shifts_by_phase[phase]
+
+        # Don't display an empty phase.
+        if not shifts:
+            continue
+
+        _write_phase_row(
+            worksheet,
+            current_row,
+            phase,
+        )
+        current_row += 1
+
+        for shift in shifts:
+            _write_shift_row(
+                worksheet,
+                current_row,
+                shift,
+                assignments,
+            )
+            current_row += 1
+
+    worksheet.freeze_panes = "B2"
+    worksheet.sheet_view.showGridLines = False
+
+    workbook.save(output_path)
