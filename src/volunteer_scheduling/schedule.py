@@ -28,8 +28,15 @@ class Shift:
     unoperational_days: tuple[str, ...] = field(default_factory=tuple)
 
     def __post_init__(self):
+        # 1. unoperational days as a tuple instead of list
         if isinstance(self.unoperational_days, list):
             object.__setattr__(self, 'unoperational_days', tuple(self.unoperational_days))
+
+        # 2. Enforce Enum conversion
+        if isinstance(self.day_phase, str):
+            # todo: smarter check (or smarter values of PhaseOfDay)
+            valid_enum = PhaseOfDay(self.day_phase)
+            object.__setattr__(self, 'day_phase', valid_enum)
 
 @dataclass
 class Volunteer:
