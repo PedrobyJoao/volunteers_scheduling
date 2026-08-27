@@ -13,19 +13,23 @@ class DayOfWeek(Enum):
     SUNDAY = "Sun"
 
 class PhaseOfDay(Enum):
-    EARLY_MORNING = 0
-    LATE_MORNING = 1
-    AFTERNOON = 2
-    EVENING = 3
+    EARLY_MORNING = "Early Morning"
+    LATE_MORNING = "Late Morning"
+    AFTERNOON = "Afternoon"
+    EVENING = "Evening"
 
-@dataclass
+@dataclass(frozen=True)
 class Shift:
     name: str
     day_phase: PhaseOfDay
     min_people: int
     max_people: int
-    importance: int # how important is the shift (1-3, e.g.: lunch is 3)
-    unoperational_days: List[str] = field(default_factory=list)
+    importance: int
+    unoperational_days: tuple[str, ...] = field(default_factory=tuple)
+
+    def __post_init__(self):
+        if isinstance(self.unoperational_days, list):
+            object.__setattr__(self, 'unoperational_days', tuple(self.unoperational_days))
 
 @dataclass
 class Volunteer:
@@ -35,7 +39,7 @@ class Volunteer:
 
 @dataclass
 class DayAssignment:
-    shift_to_people: Dict[str, List[Volunteer]]
+    shift_to_people: Dict[Shift, List[Volunteer]]
 
 @dataclass
 class Schedule:
@@ -69,7 +73,7 @@ def generate_schedule(shifts: List[Shift], volunteers: List[Volunteer]) -> Sched
             if day.name in shift.unoperational_days:
                 continue
 
-            eligible =  eligible_vols_for_shift(shift, volunteers, day) 
+            eligible =  eligible_vols_for_shift(schedule, shift, volunteers, day) 
 
             for vol in eligible: 
                 assign_volunteer_to_shift(schedule, day, shift, vol)
@@ -82,6 +86,7 @@ def generate_schedule(shifts: List[Shift], volunteers: List[Volunteer]) -> Sched
 """
 [x] Min people needed for the shift
 [x] return error if no volunteers were filled
+[] only one shift per phase of day
 """
 def eligible_vols_for_shift(
     shift: Shift, volunteers: List[Volunteer], 
@@ -104,15 +109,16 @@ def eligible_vols_for_shift(
 
 def assign_volunteer_to_shift(schedule: Schedule, day: DayOfWeek, shift: Shift, vol: Volunteer):
     if shift.name not in schedule.days[day].shift_to_people:
-        schedule.days[day].shift_to_people[shift.name] = [vol]
+        schedule.days[day].shift_to_people[shift] = [vol]
     else:
-        schedule.days[day].shift_to_people[shift.name].append(vol)
+        schedule.days[day].shift_to_people[shift].append(vol)
 
 """
 Requirements:
 
 [x] Check volunteers' days off
 [] Preferences of shifts
+[] volunteer preferences of days phase
 
 Next versions:
 
