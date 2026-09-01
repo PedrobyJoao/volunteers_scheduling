@@ -12,5 +12,7 @@ def main():
   
   week_schedule = schedule.generate_schedule(shifts, volunteers)
   sheets.write_pretty_schedule_xlsx(week_schedule)
+  print(schedule.pretty_schedule(week_schedule))
+
 
 main()

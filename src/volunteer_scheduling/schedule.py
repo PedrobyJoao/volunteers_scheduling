@@ -95,11 +95,11 @@ def generate_schedule(shifts: List[Shift], volunteers: List[Volunteer]) -> Sched
 
             eligible =  eligible_vols_for_shift(schedule, shift, volunteers, day) 
 
+            if len(eligible) < shift.min_people:
+                raise ValueError(f"Shift {shift.name} needs {shift.min_people} people, but only {len(eligible)} were found")
+
             for vol in eligible: 
                 assign_volunteer_to_shift(schedule, day, shift, vol)
-
-            if len(eligible) < shift.min_people:
-                raise RuntimeError(f"Shift {shift.name} needs {shift.min_people} people, but only {len(eligible)} were found")
 
     return schedule
 
@@ -221,3 +221,67 @@ def min_needed_level3(shifts: List[Shift], day: DayOfWeek) -> int:
 def max_vols_off(shifts: List[Shift], day: DayOfWeek, total_vols: int) -> int:
     """how many volunteers can get day off this day"""
     return total_vols - min_needed_level3(shifts, day)
+
+# PRINTING
+
+def _shift_operational_on_day(shift: 'Shift', day: 'DayOfWeek') -> bool:
+    """Return False if shift.unoperational_days lists this day (supports DayOfWeek or string values)."""
+    for u in shift.unoperational_days:
+        if isinstance(u, DayOfWeek):
+            if u == day:
+                return False
+        else:
+            # compare by name or value (case-insensitive)
+            if u.lower() == day.name.lower() or u.lower() == day.value.lower():
+                return False
+    return True
+
+def pretty_schedule(schedule: 'Schedule',
+                    show_empty_shifts: bool = True,
+                    sort_shifts_by_importance: bool = True,
+                    indent: str = "  ") -> str:
+    lines: List[str] = []
+    for day in DayOfWeek:  # iterate in enum order
+        lines.append(f"{day.name} ({day.value})")
+        day_assignment = schedule.days.get(day)
+        if not day_assignment or not day_assignment.shift_to_people:
+            lines.append(f"{indent}<no shifts assigned>")
+            lines.append("")  # blank line between days
+            continue
+
+        shifts = list(day_assignment.shift_to_people.items())  # list of (Shift, [Volunteer])
+        if sort_shifts_by_importance:
+            # sort by importance desc, then by phase, then by shift name
+            shifts.sort(key=lambda kv: (-kv[0].importance, kv[0].day_phase.value, kv[0].name))
+
+        for shift, people in shifts:
+            operational = _shift_operational_on_day(shift, day)
+            count = len(people)
+            # status icon:
+            if not operational:
+                status = "🔴"  # not operational today
+            elif count < shift.min_people:
+                status = "UNSAT"  # understaffed
+            elif count > shift.max_people:
+                status = "OVER"  # overstaffed
+            else:
+                status = "OK"  # OK
+
+            lines.append(f"{indent}{status} {shift.name} — {shift.day_phase.value} "
+                         f"(importance={shift.importance}) [{count}/{shift.min_people}-{shift.max_people}]")
+
+            if shift.unoperational_days:
+                lines.append(f"{indent*2}unoperational_days: {shift.unoperational_days}")
+
+            if people:
+                # sort volunteers by name for deterministic output
+                for vol in sorted(people, key=lambda v: v.name):
+                    desired = f" desired={vol.desired_shifts}" if getattr(vol, "desired_shifts", None) else ""
+                    lines.append(f"{indent*2}- {vol.name} (days_off={vol.days_off}){desired}")
+            else:
+                if show_empty_shifts:
+                    lines.append(f"{indent*2}- <no volunteers>")
+
+        lines.append("")  # blank line after each day
+
+    return "\n".join(lines)
