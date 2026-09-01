@@ -52,6 +52,7 @@ _Hard requirements:_
   - Volunteers' preferences
   - Volunteers with fixed shifts
   - Volunteers' days off
+  - Volunteers' availability with regards to hours
 
 _Soft requirements:_
 

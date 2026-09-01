@@ -59,7 +59,7 @@ Consider:
     with a preference of assigning everyone to Sunday after assigning all people
     to number 3 importance shifts of Sunday. And then assign volunteers days off
     to random days of the week (all volunteers hsould have 2 days off)
-- [] handle error if no volunteers fitted
+- [x] handle error if no volunteers fitted
 - [] for remaining volunteers without shifts assigned, assign them to shift Others
 - [] consider people with fixed shifts ("Misc: Construction, Arts and others..." shift also) that
     will do the same all the work days
@@ -103,19 +103,14 @@ def generate_schedule(shifts: List[Shift], volunteers: List[Volunteer]) -> Sched
 
             # check if shifts min people were assigned
             if shift.min_people > len(schedule.days[day].shift_to_people.get(shift, [])):
+                msg = f"""
+                    Shift {shift.name} needed {shift.min_people} people,
+                    but only {len(schedule.days[day].shift_to_people.get(shift, []))} were assigned
+                    """
                 if shift.importance == 3:
-                    # todo: helper func for this error msg
-                    raise ValueError(
-                            f"""
-                            Shift {shift.name} needed {shift.min_people} people,
-                            but only {len(schedule.days[day].shift_to_people.get(shift, []))} were assigned 
-                            """)
+                    raise ValueError(msg)
                 else:
-                    # todo: alert print
-                    print(f"""
-                            Shift {shift.name} needed {shift.min_people} people,
-                            but only {len(schedule.days[day].shift_to_people.get(shift, []))} were assigned
-                            """)
+                    print(f"WARNING: {msg}")
 
 
 
