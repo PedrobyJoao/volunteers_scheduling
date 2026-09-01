@@ -65,8 +65,22 @@ Consider:
     will do the same all the work days
 - [] verify if all shifts were filled
 - [] verify if all volunteers were assigned
+
+Test cases to cover:
+1. enough volunteers for shifts level 3 (considering min)
+2. assert all volunteers get 2 days off
 """
 def generate_schedule(shifts: List[Shift], volunteers: List[Volunteer]) -> Schedule:
+    # 0. check if we have enough volunteers to cover required shifts
+    for day in list(DayOfWeek):
+        min_day = min_needed_level3(shifts, day)
+        if min_day > len(volunteers):
+            raise ValueError(
+                    f"""
+                    Day {day.name} needs {min_day} volunteers,
+                    but only {len(volunteers)} were found"
+                    """)
+
     shifts_by_importance = sorted(shifts, key=lambda s: s.importance, reverse=True)
     schedule = Schedule({day: DayAssignment({}) for day in list(DayOfWeek)})
     random.shuffle(volunteers)
