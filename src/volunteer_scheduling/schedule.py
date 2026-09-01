@@ -101,6 +101,25 @@ def generate_schedule(shifts: List[Shift], volunteers: List[Volunteer]) -> Sched
             for vol in eligible: 
                 assign_volunteer_to_shift(schedule, day, shift, vol)
 
+            # check if shifts min people were assigned
+            if shift.min_people > len(schedule.days[day].shift_to_people.get(shift, [])):
+                if shift.importance == 3:
+                    # todo: helper func for this error msg
+                    raise ValueError(
+                            f"""
+                            Shift {shift.name} needed {shift.min_people} people,
+                            but only {len(schedule.days[day].shift_to_people.get(shift, []))} were assigned 
+                            """)
+                else:
+                    # todo: alert print
+                    print(f"""
+                            Shift {shift.name} needed {shift.min_people} people,
+                            but only {len(schedule.days[day].shift_to_people.get(shift, []))} were assigned
+                            """)
+
+
+
+
     return schedule
 
 """
