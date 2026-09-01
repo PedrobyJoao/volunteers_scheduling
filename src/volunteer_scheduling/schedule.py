@@ -93,7 +93,7 @@ def generate_schedule(shifts: List[Shift], volunteers: List[Volunteer]) -> Sched
             if day.name in shift.unoperational_days:
                 continue
 
-            eligible =  eligible_vols_for_shift(shift, volunteers, day) 
+            eligible =  eligible_vols_for_shift(schedule, shift, volunteers, day) 
 
             for vol in eligible: 
                 assign_volunteer_to_shift(schedule, day, shift, vol)
@@ -107,14 +107,14 @@ def generate_schedule(shifts: List[Shift], volunteers: List[Volunteer]) -> Sched
 [x] Min people needed for the shift
 [x] return error if no volunteers were filled
 """
-def eligible_vols_for_shift(
+def eligible_vols_for_shift(schedule: Schedule,
     shift: Shift, volunteers: List[Volunteer], 
     day: DayOfWeek) -> List[Volunteer]:
 
     n = 0
     eligible : List[Volunteer] = []
     for vol in volunteers:
-        if volunteer_satisfies(vol, shift, day):
+        if volunteer_satisfies(schedule, vol, shift, day):
             n += 1
             eligible.append(vol)
 
@@ -136,21 +136,36 @@ def assign_volunteer_to_shift(schedule: Schedule, day: DayOfWeek, shift: Shift, 
 Requirements:
 
 [x] Check volunteers' days off
-[] only one shift per phase of day
-[] two shifts per day per volunteer
+[x] only one shift per phase of day
+[x] two shifts per day per volunteer
 [] volunteer preferences of days phase
 [] Preferences of shifts
 
 Next versions:
 
 [] Volunteers with fixed shifts
+
+Todo: test all requirements
 """
-def volunteer_satisfies(volunteer: Volunteer, shift: Shift, day: DayOfWeek) -> bool:
-    # TODO
+def volunteer_satisfies(schedule: Schedule, volunteer: Volunteer, shift: Shift, day: DayOfWeek) -> bool:
     if day.value in volunteer.days_off:
         return False
     
+    vol_shifts = vol_shifts_of_day(schedule, volunteer, day)
+    for vol_shift in vol_shifts:
+        if vol_shift.day_phase == shift.day_phase:
+            return False
+
+    if len(vol_shifts) == 2:
+        return False
+
     return True
+
+def vol_shifts_of_day(schedule: Schedule, volunteer: Volunteer, day: DayOfWeek) -> List[Shift]:
+    return [shift 
+            for shift in schedule.days[day].shift_to_people
+            if volunteer in schedule.days[day].shift_to_people[shift]
+            ]
 
 
 def assign_days_offs(shifts: List[Shift], volunteers: List[Volunteer]):
