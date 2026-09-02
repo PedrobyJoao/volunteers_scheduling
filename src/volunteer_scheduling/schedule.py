@@ -12,6 +12,7 @@ class DayOfWeek(Enum):
     SATURDAY = "Sat"
     SUNDAY = "Sun"
 
+# todo: rely on hours instead (let's be more general)
 class PhaseOfDay(Enum):
     EARLY_MORNING = "Early Morning"
     LATE_MORNING = "Late Morning"
@@ -46,6 +47,11 @@ class Volunteer:
     # todo: how many days off (default = 2)
 
 @dataclass
+class ShiftsVolunteersYAML:
+    shifts: List[Shift]
+    volunteers: List[Volunteer]
+
+@dataclass
 class DayAssignment:
     shift_to_people: Dict[Shift, List[Volunteer]]
 
@@ -56,15 +62,12 @@ class Schedule:
 """
 Consider:
 - [x] Shift operational days
-- [x] if no 2 days off are assigned to volunteer, we must assign randomly
-    with a preference of assigning everyone to Sunday after assigning all people
-    to number 3 importance shifts of Sunday. And then assign volunteers days off
-    to random days of the week (all volunteers hsould have 2 days off)
-- [x] handle error if no volunteers fitted
+- [x] assign days off if not assigned yet
 - [] for remaining volunteers without shifts assigned, assign them to shift Others
 - [] consider people with fixed shifts ("Misc: Construction, Arts and others..." shift also) that
     will do the same all the work days
-- [] verify if all shifts were filled
+- [] ignore preferences when minimum quote is not reached for level 3 shifts
+- [x] verify if all shifts were filled
 - [] verify if all volunteers were assigned
 
 Test cases to cover:

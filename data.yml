@@ -1,0 +1,59 @@
+shifts:
+  - name: Breakfast
+    day_phase: "Early Morning"
+    min_people: 2
+    max_people: 4
+    importance: 3
+
+  - name: Lunch
+    min_people: 2
+    day_phase: "Late Morning"
+    max_people: 5
+    importance: 3
+
+  - name: Dinner
+    day_phase: "Afternoon"
+    min_people: 2
+    max_people: 5
+    importance: 3
+
+  - name: Agriculture
+    min_people: 1
+    day_phase: "Early Morning"
+    min_people: 2
+    max_people: 5
+    importance: 1
+    unoperational_days: ["Sun"]
+
+  - name: Others (Construction, Arts...)
+    min_people: 1
+    day_phase: "Evening"
+    min_people: 2
+    max_people: 5
+    importance: 1
+    unoperational_days: ["Sun"]
+
+volunteers:
+  - name: Carol
+    desired_shifts: ["Agriculture", "Cleaning"]
+    days_off: ["Mon", "Thu"]
+
+  - name: David
+    desired_shifts: ["Kitchen", "Misc"]
+    days_off: ["Sun", "Fri"]
+
+  - name: Emma
+    desired_shifts: ["Cleaning"]
+    days_off: ["Wed", "Sat"]
+
+  - name: Frank
+    desired_shifts: ["Agriculture", "Kitchen"]
+    days_off: ["Tue", "Sun"]
+
+  - name: Grace
+    desired_shifts: ["Misc", "Cleaning"]
+    days_off: ["Thu", "Fri"]
+
+  - name: Henry
+    desired_shifts: ["Kitchen"]
+    days_off: ["Mon", "Sat"]
