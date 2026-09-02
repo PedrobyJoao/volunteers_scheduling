@@ -28,11 +28,10 @@ class Shift:
     unoperational_days: tuple[str, ...] = field(default_factory=tuple)
 
     def __post_init__(self):
-        # 1. unoperational days as a tuple instead of list
         if isinstance(self.unoperational_days, list):
             object.__setattr__(self, 'unoperational_days', tuple(self.unoperational_days))
 
-        # 2. Enforce Enum conversion
+        # enforce Enum conversion
         if isinstance(self.day_phase, str):
             # todo: smarter check (or smarter values of PhaseOfDay)
             valid_enum = PhaseOfDay(self.day_phase)
@@ -43,6 +42,8 @@ class Volunteer:
     name: str
     days_off: List[str]
     desired_shifts: List[str] = field(default_factory=list)
+    # todo: how many shifts to be worked (default = 2)
+    # todo: how many days off (default = 2)
 
 @dataclass
 class DayAssignment:
@@ -95,9 +96,6 @@ def generate_schedule(shifts: List[Shift], volunteers: List[Volunteer]) -> Sched
 
             eligible =  eligible_vols_for_shift(schedule, shift, volunteers, day) 
 
-            if len(eligible) < shift.min_people:
-                raise ValueError(f"Shift {shift.name} needs {shift.min_people} people, but only {len(eligible)} were found")
-
             for vol in eligible: 
                 assign_volunteer_to_shift(schedule, day, shift, vol)
 
@@ -136,12 +134,16 @@ def eligible_vols_for_shift(schedule: Schedule,
             break
 
     if n < shift.min_people:
-        raise RuntimeError(f"Shift {shift.name} needs {shift.min_people} people, but only {n} were found")
+        msg = f"Shift {shift.name} needs {shift.min_people} people, but only {n} were found"
+        if shift.importance == 3:
+            raise ValueError(msg)
+        else:
+            print(f"WARNING: {msg}")
 
     return eligible
 
 def assign_volunteer_to_shift(schedule: Schedule, day: DayOfWeek, shift: Shift, vol: Volunteer):
-    if shift.name not in schedule.days[day].shift_to_people:
+    if shift not in schedule.days[day].shift_to_people:
         schedule.days[day].shift_to_people[shift] = [vol]
     else:
         schedule.days[day].shift_to_people[shift].append(vol)
