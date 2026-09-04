@@ -1,3 +1,7 @@
+"""
+TODO: add 1 additional first row right below the days of the week,
+with the name of people with day off for the day
+"""
 from pathlib import Path
 from typing import Dict, List
 
@@ -8,7 +12,7 @@ from openpyxl.worksheet.worksheet import Worksheet
 
 from .schedule import (
     DayOfWeek,
-    PhaseOfDay,
+    TimePeriod,
     Schedule,
     Shift,
     Volunteer,
@@ -88,16 +92,6 @@ def _volunteer_names(volunteers: List[Volunteer]) -> str:
     return "\n".join(volunteer.name for volunteer in volunteers)
 
 
-def _phase_title(phase: PhaseOfDay) -> str:
-    """Return the human-readable title for a phase of the day."""
-    return {
-        PhaseOfDay.EARLY_MORNING: "Early morning",
-        PhaseOfDay.LATE_MORNING: "Late morning",
-        PhaseOfDay.AFTERNOON: "Afternoon",
-        PhaseOfDay.EVENING: "Evening",
-    }[phase]
-
-
 def _collect_shifts(schedule: Schedule) -> List[Shift]:
     """
     Collect all distinct Shift objects used by the schedule.
@@ -120,15 +114,12 @@ def _collect_shifts(schedule: Schedule) -> List[Shift]:
     return shifts
 
 
-def _group_shifts_by_phase(schedule: Schedule) -> Dict[PhaseOfDay, List[Shift]]:
+def _group_shifts_by_phase(schedule: Schedule) -> Dict[TimePeriod, List[Shift]]:
     """Group shifts by their Shift.day_phase."""
-    groups: Dict[PhaseOfDay, List[Shift]] = {
-        phase: []
-        for phase in PhaseOfDay
-    }
+    groups: Dict[TimePeriod, List[Shift]] = {}
 
     for shift in _collect_shifts(schedule):
-        groups[shift.day_phase].append(shift)
+        groups[shift.time_period].append(shift)
 
     return groups
 
@@ -203,7 +194,7 @@ def _write_header(ws: Worksheet) -> None:
 def _write_phase_row(
     ws: Worksheet,
     row_number: int,
-    phase: PhaseOfDay,
+    time_period: TimePeriod,
 ) -> None:
     """Write and style a phase separator row."""
     last_column = len(DayOfWeek) + 1
@@ -218,7 +209,7 @@ def _write_phase_row(
     cell = ws.cell(
         row=row_number,
         column=1,
-        value=_phase_title(phase),
+        value=time_period.name,
     )
 
     cell.fill = PHASE_FILL
@@ -294,6 +285,7 @@ def _write_shift_row(
 
 def write_pretty_schedule_xlsx(
     schedule: Schedule,
+    time_periods: list[TimePeriod],
     output_path: str | Path = "schedule.xlsx",
     sheet_title: str = "Weekly Schedule",
 ) -> None:
@@ -333,8 +325,8 @@ def write_pretty_schedule_xlsx(
 
     current_row = 2
 
-    for phase in PhaseOfDay:
-        shifts = shifts_by_phase[phase]
+    for time_period in time_periods:
+        shifts = shifts_by_phase[time_period]
 
         # Don't display an empty phase.
         if not shifts:
@@ -343,7 +335,7 @@ def write_pretty_schedule_xlsx(
         _write_phase_row(
             worksheet,
             current_row,
-            phase,
+            time_period,
         )
         current_row += 1
 

@@ -1,25 +1,39 @@
+time_periods:
+  - name: "Early Morning"
+    start: "07:00"
+    end: "08:00"
+  - name: Late Morning
+    start: "09:45"
+    end: "13:00"
+  - name: Afternoon
+    start: "17:00"
+    end: "19:00"
+  - name: Evening
+    start: "20:00"
+    end: "21:00"
+
 shifts:
   - name: Breakfast
-    day_phase: "Early Morning"
+    time_period: Early Morning
     min_people: 2
     max_people: 4
     importance: 3
 
   - name: Lunch
     min_people: 2
-    day_phase: "Late Morning"
+    time_period: Late Morning
     max_people: 5
     importance: 3
 
   - name: Dinner
-    day_phase: "Afternoon"
+    time_period: Afternoon
     min_people: 2
     max_people: 5
     importance: 3
 
   - name: Agriculture
     min_people: 1
-    day_phase: "Early Morning"
+    time_period: Late Morning
     min_people: 2
     max_people: 5
     importance: 1
@@ -27,7 +41,7 @@ shifts:
 
   - name: Others (Construction, Arts...)
     min_people: 1
-    day_phase: "Evening"
+    time_period: late morning
     min_people: 2
     max_people: 5
     importance: 1
