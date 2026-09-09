@@ -33,8 +33,8 @@ def parse(path: str) -> schedule_2.ShiftsVolunteersYAML:
                 name=s["name"],
                 time_period=period_map[tp_name_clean],
                 work_type=s.get("work_type", schedule_2.WorkType.others),
-                min_people=s["min_people"],
-                max_people=s["max_people"],
+                min_people=s.get("min_people", 1),
+                max_people=s.get("max_people", 5),
                 unoperational_days=s.get("unoperational_days", ()),
 
             )

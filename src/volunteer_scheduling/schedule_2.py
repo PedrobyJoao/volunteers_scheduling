@@ -72,7 +72,7 @@ class Shift(BaseModel):
     time_period: TimePeriod
     work_type: WorkType = WorkType.others
     min_people: int
-    max_people: int
+    max_people: int = 5
     unoperational_days: tuple[DayOfWeek, ...]
 
 class Volunteer(BaseModel):
@@ -257,6 +257,9 @@ class Schedule:
 
     def snapshot(self) -> ScheduleGrid:
         return deepcopy(self.schedule)
+
+    def volunteers(self) -> List[Volunteer]:
+        return deepcopy(list(self.vols_shifts.keys()))
 
     # ----------------------
     # Printing/Debugging

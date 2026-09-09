@@ -11,6 +11,6 @@ def main():
     week_schedule.pretty_days_off()
     print()
     print("Writing to xlsx")
-    sheets.write_pretty_schedule_xlsx(week_schedule.snapshot(), obj.volunteers, obj.time_periods)
+    sheets.write_pretty_schedule_xlsx(week_schedule.snapshot(), week_schedule.volunteers(), obj.time_periods)
 
 main()
