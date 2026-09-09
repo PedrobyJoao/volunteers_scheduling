@@ -62,6 +62,7 @@ volunteers:
 
   - name: Ian
     max_days_off: 1
+    unavailable_periods: ["Late Morning"]
 
   - name: Eden
     max_number_of_shifts: 1

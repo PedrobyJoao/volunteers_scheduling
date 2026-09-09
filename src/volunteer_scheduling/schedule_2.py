@@ -1,6 +1,7 @@
 """
 TODOs:
-[] volunteer available time periods
+[] test prefered shifts
+[] warning when typos, wrong fields in yaml
 
 
 DONE:
@@ -12,6 +13,7 @@ Volunteer-wise:
 [x] Preferences of shifts
 [x] assign days off if not assigned yet
 [x] Check volunteers' days off
+[x] volunteer available time periods
 
 Shift-Wise
 [x] shift capacity (max_people)
@@ -33,13 +35,13 @@ from copy import deepcopy
 import random
 
 class DayOfWeek(Enum):
-    MONDAY = "Mon"
-    TUESDAY = "Tue"
-    WEDNESDAY = "Wed"
-    THURSDAY = "Thu"
-    FRIDAY = "Fri"
-    SATURDAY = "Sat"
-    SUNDAY = "Sun"
+    MONDAY = "Monday"
+    TUESDAY = "Tuesday"
+    WEDNESDAY = "Wednesday"
+    THURSDAY = "Thursday"
+    FRIDAY = "Friday"
+    SATURDAY = "Saturday"
+    SUNDAY = "Sunday"
 
 # todo: this should be described by the yaml instead
 class WorkType(Enum):
@@ -144,12 +146,15 @@ class Schedule:
                 vols.append(vol)
         return deepcopy(vols)
 
-    def available_vols_day_tp(self, day: DayOfWeek, tp: TimePeriod) -> List[Volunteer]:
+    def available_vols_tp_day(self, day: DayOfWeek, tp: TimePeriod) -> List[Volunteer]:
         vols = []
         for vol in self.vols_shifts:
             fulfilled_max_shifts = len(self.vols_shifts[vol][day]) >= vol.max_number_of_shifts
             already_has_tp = tp in self.vols_shifts[vol][day]
-            if day not in vol.days_off and not fulfilled_max_shifts and not already_has_tp:
+            if (day not in vol.days_off
+                and not fulfilled_max_shifts
+                and not already_has_tp 
+                and not tp in vol.unavailable_periods):
                 vols.append(vol)
         return deepcopy(vols)
 
@@ -180,6 +185,7 @@ class Schedule:
           [x] only one shift per time period
           [x] at most 2 shifts per day for volunteer
           [x] shift capacity (max_people)
+          [x] unavailable time periods respected
           [] volunteer fixed_shift respected (if set, must match shift.name)
         """
 
@@ -191,6 +197,8 @@ class Schedule:
         #         return f"volunteer {volunteer.name!r} fixed to {volunteer.fixed_shift!r}"
         if self._vol_has_time_period(volunteer, day, shift.time_period):
             return f"volunteer {volunteer.name!r} already has a shift in time period {shift.time_period.name!r} on {day.name}"
+        if shift.time_period in volunteer.unavailable_periods:
+            return f"volunteer {volunteer.name!r} is unavailable in time period {shift.time_period.name!r}"
         if len(self._vol_shifts_of_day(volunteer, day)) >= volunteer.max_number_of_shifts:
             return f"""volunteer {volunteer.name!r} already has 
                         reached its maximum number of {volunteer.max_number_of_shifts} shifts on {day.name}
@@ -337,7 +345,7 @@ Them managers should handle people in Others manually.
 def generate_schedule(all_shifts: List['Shift'], volunteers: List['Volunteer'], time_periods: List['TimePeriod']) -> Schedule:
     print("Assigning days off")
     random.shuffle(volunteers) # for fairness
-    assign_days_offs(all_shifts, volunteers)
+    vols_with_days_off = assign_days_offs(all_shifts, volunteers)
 
     joker_shift = Shift(
         name="Other",
@@ -353,7 +361,7 @@ def generate_schedule(all_shifts: List['Shift'], volunteers: List['Volunteer'], 
     all_shifts.append(joker_shift)
 
     print("Initiating schedule")
-    sched = Schedule(all_shifts, volunteers, time_periods)
+    sched = Schedule(all_shifts, vols_with_days_off, time_periods)
 
 
     for day in list(DayOfWeek):
@@ -364,7 +372,7 @@ def generate_schedule(all_shifts: List['Shift'], volunteers: List['Volunteer'], 
             for shift in shifts:
                 print(f"Assigning shift {shift.name}")
                 # 1. fill only volunteers with preferences
-                all_available = iter(sched.available_vols_day_tp(day, time_period))
+                all_available = iter(sched.available_vols_tp_day(day, time_period))
                 while sched.has_shift_minimum(shift, day):
                     try:
                         vol = next(all_available)
@@ -375,7 +383,7 @@ def generate_schedule(all_shifts: List['Shift'], volunteers: List['Volunteer'], 
 
                 # 2. if not minimum fulfilled, assign any other volunteer available
                 while not sched.has_shift_minimum(shift, day):
-                    available_vols_others = sched.available_vols_day_tp(day, time_period)
+                    available_vols_others = sched.available_vols_tp_day(day, time_period)
                     if not available_vols_others:
                         raise Exception(f"Failed to fulfill minimum for shift {shift.name} in time period {time_period.name}")
                     vol = random.choice(available_vols_others)
@@ -392,7 +400,7 @@ def generate_schedule(all_shifts: List['Shift'], volunteers: List['Volunteer'], 
     return sched
 
 
-def assign_days_offs(shifts: List[Shift], volunteers: List[Volunteer]):
+def assign_days_offs(shifts: List[Shift], volunteers: List[Volunteer]) -> List[Volunteer]:
     """
     TODO!!!: volunteers.days_off is now immutable so we had to deal with new vars,
     maybe find another way
@@ -419,6 +427,8 @@ def assign_days_offs(shifts: List[Shift], volunteers: List[Volunteer]):
         if len(v.days_off) != v.max_days_off:
             raise RuntimeError(f"{v.name} ended with {len(v.days_off)} days off (expected {v.max_days_off})")
 
+    return final_vols
+
 def assign_weekend_day_off(shifts: List[Shift],
                            day: DayOfWeek, volunteers: List[Volunteer]) -> List[Volunteer]:
     off_count = 0
@@ -431,7 +441,7 @@ def assign_weekend_day_off(shifts: List[Shift],
             continue
 
         if day.name not in vol.days_off:
-            days_off = vol.days_off + (day.name,)
+            days_off = vol.days_off + (day.value,)
             new_vol = Volunteer(
                 name=vol.name,
                 days_off=days_off,
