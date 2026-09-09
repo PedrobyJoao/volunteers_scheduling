@@ -2,10 +2,12 @@
 TODOs:
 [] test prefered shifts
 [] warning when typos, wrong fields in yaml
-[] min num of people for days off must also depend on the number of shifts?
-for now, we just have to manually move this people days off to Sunday, and put them in
-the Others of another day
-
+[] improve days off algorithm
+    [] most people possible on Sunday and then split days off equally
+    in the week days, lastly assign saturday
+    [] min num of people for days off must also depend on the number of shifts?
+    for now, we just have to manually move this people days off to Sunday, and put them in
+    the Others of another day
 
 DONE:
 
@@ -422,21 +424,21 @@ def assign_days_offs(shifts: List[Shift], volunteers: List[Volunteer]) -> List[V
     # Sunday first
     vols_sun = assign_weekend_day_off(shifts, DayOfWeek.SUNDAY, volunteers)
 
-    # Saturday
-    vols_sat = assign_weekend_day_off(shifts, DayOfWeek.SATURDAY, vols_sun)
-
     # weekdays (todo randomize)
     days: List[DayOfWeek] = [DayOfWeek.MONDAY, DayOfWeek.TUESDAY, DayOfWeek.WEDNESDAY, DayOfWeek.THURSDAY, DayOfWeek.FRIDAY]
     random.shuffle(days)
-    final_vols = deepcopy(vols_sat)
+    assigned_weekdays_vols = deepcopy(vols_sun)
     for day in days:
-        final_vols = assign_weekend_day_off(shifts, day, final_vols)
+        assigned_weekdays_vols = assign_weekend_day_off(shifts, day, assigned_weekdays_vols)
 
-    for v in final_vols:
+    # Saturday
+    assigned_saturday = assign_weekend_day_off(shifts, DayOfWeek.SATURDAY, assigned_weekdays_vols)
+
+    for v in assigned_saturday:
         if len(v.days_off) != v.max_days_off:
             raise RuntimeError(f"{v.name} ended with {len(v.days_off)} days off (expected {v.max_days_off})")
 
-    return final_vols
+    return assigned_saturday 
 
 def assign_weekend_day_off(shifts: List[Shift],
                            day: DayOfWeek, volunteers: List[Volunteer]) -> List[Volunteer]:

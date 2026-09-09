@@ -57,7 +57,6 @@ volunteers:
     days_off: ["Monday"]
 
   - name: Ian
-    max_days_off: 1
     unavailable_periods: ["Late Morning"]
 
   - name: Eden
