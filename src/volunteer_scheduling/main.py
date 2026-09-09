@@ -1,17 +1,16 @@
-import yaml
-from pydantic import TypeAdapter
-from . import schedule
+from . import schedule_2
 from . import sheets
+from . import parser
 
 
 def main():
-  with open("data.yml") as f:
-      data = yaml.safe_load(f)
-      obj = TypeAdapter(schedule.ShiftsVolunteersYAML).validate_python(data)
-  
-  week_schedule = schedule.generate_schedule(obj.shifts, obj.volunteers)
-  sheets.write_pretty_schedule_xlsx(week_schedule)
-  print(schedule.pretty_schedule(week_schedule))
-
+    obj = parser.parse("data.yml")
+    week_schedule = schedule_2.generate_schedule(obj.shifts, obj.volunteers, obj.time_periods)
+    week_schedule.pretty_print()
+    print()
+    week_schedule.pretty_days_off()
+    print()
+    print("Writing to xlsx")
+    sheets.write_pretty_schedule_xlsx(week_schedule.snapshot(), week_schedule.volunteers(), obj.time_periods)
 
 main()

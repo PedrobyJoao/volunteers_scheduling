@@ -1,7 +1,15 @@
-from dataclasses import dataclass, field
-from typing import List, Dict
-from enum import Enum
+"""
+[] consider that one of the day phases might be required for everyone
+(as now it's considered early morning required)
+[] use pydantic
+"""
+
+from dataclasses import dataclass
+from typing import List, Dict, Tuple
+from datetime import time
+from enum import Enum 
 import random
+from pydantic import BaseModel, ConfigDict
 
 class DayOfWeek(Enum):
     MONDAY = "Mon"
@@ -12,52 +20,160 @@ class DayOfWeek(Enum):
     SATURDAY = "Sat"
     SUNDAY = "Sun"
 
-# todo: rely on hours instead (let's be more general)
-class PhaseOfDay(Enum):
-    EARLY_MORNING = "Early Morning"
-    LATE_MORNING = "Late Morning"
-    AFTERNOON = "Afternoon"
-    EVENING = "Evening"
-
-@dataclass(frozen=True)
-class Shift:
+class TimePeriod(BaseModel):
+    model_config = ConfigDict(frozen=True)
     name: str
-    day_phase: PhaseOfDay
+    start: time
+    end: time
+
+class Shift(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    name: str
+    time_period: TimePeriod
     min_people: int
     max_people: int
-    importance: int
-    unoperational_days: tuple[str, ...] = field(default_factory=tuple)
+    importance: int # todo: change from importance to required?
+    unoperational_days: tuple[str, ...]
 
-    def __post_init__(self):
-        if isinstance(self.unoperational_days, list):
-            object.__setattr__(self, 'unoperational_days', tuple(self.unoperational_days))
 
-        # enforce Enum conversion
-        if isinstance(self.day_phase, str):
-            # todo: smarter check (or smarter values of PhaseOfDay)
-            valid_enum = PhaseOfDay(self.day_phase)
-            object.__setattr__(self, 'day_phase', valid_enum)
-
-@dataclass
-class Volunteer:
+class Volunteer(BaseModel):
     name: str
     days_off: List[str]
-    desired_shifts: List[str] = field(default_factory=list)
+    fixed_shift: str = "" # for people only working on the same thing (e.g.: construction, agriculture)
+    desired_shifts: List[str]
     # todo: how many shifts to be worked (default = 2)
     # todo: how many days off (default = 2)
 
-@dataclass
-class ShiftsVolunteersYAML:
+class ShiftsVolunteersYAML(BaseModel):
+    time_periods: List[TimePeriod]
     shifts: List[Shift]
     volunteers: List[Volunteer]
 
 @dataclass
-class DayAssignment:
+class DayAssignment():
     shift_to_people: Dict[Shift, List[Volunteer]]
 
 @dataclass
 class Schedule:
-    days: Dict[DayOfWeek, DayAssignment]
+    def __init__(self, shifts: List[Shift]):
+        self.days: Dict[DayOfWeek, DayAssignment] = {
+                d: DayAssignment({s: [] for s in shifts}) 
+                for d in DayOfWeek
+                }
+
+
+    # --------- helpers ----------
+    @staticmethod
+    def _shift_operational_on_day(shift: Shift, day: DayOfWeek) -> bool:
+        for u in shift.unoperational_days:
+            if isinstance(u, DayOfWeek):
+                if u == day:
+                    return False
+            else:
+                # compare by name or value (case-insensitive)
+                s = str(u).lower()
+                if s == day.name.lower() or s == day.value.lower():
+                    return False
+        return True
+
+    def _vol_shifts_of_day(self, volunteer: Volunteer, day: DayOfWeek) -> List[Shift]:
+        da = self.days[day]
+        return [s for s, vols in da.shift_to_people.items() if volunteer in vols]
+
+    def _vol_has_time_period(self, volunteer: Volunteer, day: DayOfWeek, tp: TimePeriod) -> bool:
+        da = self.days[day]
+        for shift, vols in da.shift_to_people.items():
+            if shift.time_period == tp and volunteer in vols:
+                return True
+        return False
+
+    def _count_vol_shifts_on_day(self, volunteer: 'Volunteer', day: DayOfWeek) -> int:
+        return len(self._vol_shifts_of_day(volunteer, day))
+
+    # --------- inspection / snapshots ----------
+    def get_day_assignment(self, day: DayOfWeek) -> DayAssignment:
+        return deepcopy(self.days[day])
+
+    def snapshot(self) -> Dict[DayOfWeek, DayAssignment]:
+        return deepcopy(self.days)
+
+    def iter_assignments(self):
+        for day, da in self.days.items():
+            for shift, vols in da.shift_to_people.items():
+                yield day, shift, tuple(vols)
+
+    # --------- validation / can_assign ----------
+    def can_assign(self, volunteer: 'Volunteer', day: DayOfWeek, shift: 'Shift') -> Tuple[bool, str]:
+        """
+        Return (True, "") when ok, else (False, reason).
+        Does not mutate.
+        """
+        # operational day
+        if not self._shift_operational_on_day(shift, day):
+            return False, f"Shift {shift.name!r} not operational on {day.name}"
+
+        # day off
+        if day.value in volunteer.days_off:
+            return False, f"Volunteer {volunteer.name!r} has {day.name} as day off"
+
+        # fixed shift constraint
+        if volunteer.fixed_shift and volunteer.fixed_shift != shift.name:
+            return False, f"Volunteer {volunteer.name!r} fixed to {volunteer.fixed_shift!r}"
+
+        # can not be assigned twice to the same time period
+        if self._vol_has_time_period(volunteer, day, shift.time_period):
+            return False, f"Volunteer {volunteer.name!r} already has a shift in time period {shift.time_period.name!r} on {day.name}"
+
+        # max 2 shifts/day
+        # todo: this should come from volunteer.num_days_offs
+        if self._count_vol_shifts_on_day(volunteer, day) >= 2:
+            return False, f"Volunteer {volunteer.name!r} already has 2 shifts on {day.name}"
+
+        # shift max capacity
+        current = self.days[day].shift_to_people.get(shift, [])
+        if shift.max_people is not None and len(current) >= shift.max_people:
+            return False, f"Shift {shift.name!r} on {day.name} at max capacity ({shift.max_people})"
+
+        return True, ""
+
+    # --------- mutations ----------
+    def assign(self, volunteer: Volunteer, day: DayOfWeek, shift: Shift, raise_on_error: bool = False) -> bool:
+        ok, reason = self.can_assign(volunteer, day, shift)
+        if not ok:
+            if raise_on_error:
+                raise AssignmentError(reason)
+            return False
+
+        da = self.days[day]
+        if shift not in da.shift_to_people:
+            da.shift_to_people[shift] = [volunteer]
+        else:
+            if volunteer in da.shift_to_people[shift]:
+                return True 
+            da.shift_to_people[shift].append(volunteer)
+        return True
+
+    # --------- audits ----------
+
+    def validate_minima(self) -> List[str]:
+        problems: List[str] = []
+        for day, da in self.days.items():
+            for shift, vols in da.shift_to_people.items():
+                if day.value in shift.unoperational_days:
+                    continue
+                if shift.min_people is not None and len(vols) < shift.min_people:
+                    problems.append(f"Day {day.name}: shift {shift.name} needs {shift.min_people} but has {len(vols)}")
+        return problems
+
+    # --------- lookup ----------
+
+    def find_volunteer_assignments(self, volunteer: Volunteer) -> Dict[DayOfWeek, List[Shift]]:
+        result: Dict[DayOfWeek, List[Shift]] = {}
+        for day, da in self.days.items():
+            assigned = [s for s, vols in da.shift_to_people.items() if volunteer in vols]
+            if assigned:
+                result[day] = list(assigned)
+        return result
 
 """
 Consider:
@@ -159,9 +275,6 @@ Requirements:
 [x] two shifts per day per volunteer
 [] volunteer preferences of days phase
 [] Preferences of shifts
-
-Next versions:
-
 [] Volunteers with fixed shifts
 
 Todo: test all requirements
@@ -172,7 +285,7 @@ def volunteer_satisfies(schedule: Schedule, volunteer: Volunteer, shift: Shift, 
     
     vol_shifts = vol_shifts_of_day(schedule, volunteer, day)
     for vol_shift in vol_shifts:
-        if vol_shift.day_phase == shift.day_phase:
+        if vol_shift.time_period == shift.time_period:
             return False
 
     if len(vol_shifts) == 2:
@@ -271,7 +384,7 @@ def pretty_schedule(schedule: 'Schedule',
         shifts = list(day_assignment.shift_to_people.items())  # list of (Shift, [Volunteer])
         if sort_shifts_by_importance:
             # sort by importance desc, then by phase, then by shift name
-            shifts.sort(key=lambda kv: (-kv[0].importance, kv[0].day_phase.value, kv[0].name))
+            shifts.sort(key=lambda kv: (-kv[0].importance, kv[0].time_period.start, kv[0].name))
 
         for shift, people in shifts:
             operational = _shift_operational_on_day(shift, day)
@@ -286,7 +399,7 @@ def pretty_schedule(schedule: 'Schedule',
             else:
                 status = "OK"  # OK
 
-            lines.append(f"{indent}{status} {shift.name} — {shift.day_phase.value} "
+            lines.append(f"{indent}{status} {shift.name} — {shift.time_period.start} "
                          f"(importance={shift.importance}) [{count}/{shift.min_people}-{shift.max_people}]")
 
             if shift.unoperational_days:

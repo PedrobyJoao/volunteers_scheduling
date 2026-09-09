@@ -1,59 +1,75 @@
+time_periods:
+  - name: "Early Morning"
+    start: "07:00"
+    end: "08:00"
+  - name: Late Morning
+    start: "09:45"
+    end: "13:00"
+  - name: Afternoon
+    start: "17:00"
+    end: "19:00"
+  - name: Evening
+    start: "20:00"
+    end: "21:00"
+
 shifts:
   - name: Breakfast
-    day_phase: "Early Morning"
+    time_period: Early Morning
     min_people: 2
-    max_people: 4
-    importance: 3
 
   - name: Lunch
-    min_people: 2
-    day_phase: "Late Morning"
-    max_people: 5
-    importance: 3
+    time_period: Late Morning
+    min_people: 3
+    unoperational_days: ["Sunday"]
 
   - name: Dinner
-    day_phase: "Afternoon"
-    min_people: 2
-    max_people: 5
-    importance: 3
+    time_period: Afternoon
+    min_people: 3
+    unoperational_days: ["Friday", "Saturday"]
 
-  - name: Agriculture
+  - name: Shared spaces cleaning
+    time_period: Late Morning
     min_people: 1
-    day_phase: "Early Morning"
-    min_people: 2
-    max_people: 5
-    importance: 1
-    unoperational_days: ["Sun"]
 
-  - name: Others (Construction, Arts...)
+  - name: Watering
+    time_period: Early Morning
     min_people: 1
-    day_phase: "Evening"
-    min_people: 2
-    max_people: 5
-    importance: 1
-    unoperational_days: ["Sun"]
+
+  - name: Chickens
+    time_period: Early Morning
+    min_people: 1
 
 volunteers:
   - name: Carol
-    desired_shifts: ["Agriculture", "Cleaning"]
-    days_off: ["Mon", "Thu"]
+    desired_work: ["Kitchen"]
 
   - name: David
-    desired_shifts: ["Kitchen", "Misc"]
-    days_off: ["Sun", "Fri"]
+    desired_work: ["Housekeeping"]
+    days_off: ["Friday"]
 
   - name: Emma
-    desired_shifts: ["Cleaning"]
-    days_off: ["Wed", "Sat"]
+    desired_work: ["Kitchen"]
+    days_off: ["Wednesday", "Saturday"]
 
   - name: Frank
-    desired_shifts: ["Agriculture", "Kitchen"]
-    days_off: ["Tue", "Sun"]
+    desired_work: ["Kitchen"]
 
   - name: Grace
-    desired_shifts: ["Misc", "Cleaning"]
-    days_off: ["Thu", "Fri"]
+    max_days_off: 1
 
   - name: Henry
-    desired_shifts: ["Kitchen"]
-    days_off: ["Mon", "Sat"]
+    days_off: ["Monday"]
+
+  - name: Ian
+    unavailable_periods: ["Late Morning"]
+
+  - name: Eden
+    max_number_of_shifts: 1
+
+  - name: Carlo
+  - name: Marco
+  - name: Aristoteles
+  - name: Platao
+  - name: Socrates
+  - name: Ada Lovelace
+  - name: Adele
