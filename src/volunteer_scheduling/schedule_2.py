@@ -2,6 +2,11 @@
 TODOs:
 [] test prefered shifts
 [] warning when typos, wrong fields in yaml
+[] improve schedule algorithm
+    [] first assign volunteers with preferred shifts to their shifts because
+    it's happening that preferred shifts are assigned yes but the algorithm
+    is not giving much weight to it. Bob preferring A gets A sometimes, Alice
+    without preference also gets A, Bob should get A always?
 [] improve days off algorithm
     [] most people possible on Sunday and then split days off equally
     in the week days, lastly assign saturday
@@ -80,6 +85,9 @@ class Volunteer(BaseModel):
     max_days_off: int = 2
     max_number_of_shifts: int = 2
 
+class ScheduleGrid(BaseModel): 
+    s: Dict[DayOfWeek, Dict['TimePeriod', Dict['Shift', List['Volunteer']]]] = {}
+
 class ShiftsVolunteersYAML(BaseModel):
     time_periods: List[TimePeriod]
     shifts: List[Shift]
@@ -91,12 +99,12 @@ class AssignmentError(RuntimeError):
 @dataclass
 class Schedule:
     def __init__(self, shifts: List['Shift'], vols: List['Volunteer'], time_periods: List['TimePeriod']):
-            self.vols_shifts : Dict[Volunteer, Dict[DayOfWeek, Dict[TimePeriod, Shift]]] = {}
-            self.schedule : Dict[DayOfWeek, Dict['TimePeriod', Dict['Shift', List['Volunteer']]]] = {}
+            self.vols_shifts: Dict[Volunteer, Dict[DayOfWeek, Dict[TimePeriod, Shift]]] = {}
+            self.schedule: ScheduleGrid = ScheduleGrid(s={})
             for day in DayOfWeek:
-                self.schedule[day] = {}
+                self.schedule.s[day] = {}
                 for tp in time_periods:
-                    self.schedule[day][tp] = {}
+                    self.schedule.s[day][tp] = {}
                 for shift in shifts:
                     self._add_shift_for_day(day, shift)
 
@@ -109,11 +117,11 @@ class Schedule:
         if not self._shift_operational_on_day(shift, day):
             return
         tp = shift.time_period
-        if tp not in self.schedule[day]:
-            self.schedule[day][tp] = {}
+        if tp not in self.schedule.s[day]:
+            self.schedule.s[day][tp] = {}
 
-        if shift not in self.schedule[day][tp]:
-            self.schedule[day][tp][shift] = []
+        if shift not in self.schedule.s[day][tp]:
+            self.schedule.s[day][tp][shift] = []
 
     def _shift_operational_on_day(self, shift: 'Shift', day: DayOfWeek) -> bool:
         for u in shift.unoperational_days:
@@ -131,14 +139,14 @@ class Schedule:
     # ----------------------
     def _vol_shifts_of_day(self, volunteer: 'Volunteer', day: DayOfWeek) -> List['Shift']:
         result: List['Shift'] = []
-        for tp_map in (self.schedule.get(day) or {}).values():
+        for tp_map in (self.schedule.s.get(day) or {}).values():
             for shift, vols in tp_map.items():
                 if volunteer in vols:
                     result.append(shift)
         return result
 
     def _vol_has_time_period(self, volunteer: 'Volunteer', day: DayOfWeek, tp: 'TimePeriod') -> bool:
-        tp_map = self.schedule.get(day, {}).get(tp, {})
+        tp_map = self.schedule.s.get(day, {}).get(tp, {})
         for vols in tp_map.values():
             if volunteer in vols:
                 return True
@@ -165,16 +173,16 @@ class Schedule:
         return deepcopy(vols)
 
     def shifts_in_day_tp(self, day: DayOfWeek, tp: TimePeriod) -> List[Shift]:
-        return deepcopy([shift for shift in self.schedule.get(day, {}).get(tp, {}).keys()])
+        return deepcopy([shift for shift in self.schedule.s.get(day, {}).get(tp, {}).keys()])
 
     def shifts_in_day(self, day: DayOfWeek) -> List[Shift]:
         shifts : List[Shift] = []
-        for tp_map in self.schedule.get(day, {}).values():
+        for tp_map in self.schedule.s.get(day, {}).values():
             shifts.extend(tp_map.keys())
         return deepcopy(shifts)
 
     def _vols_in_shift(self, shift: Shift, day: DayOfWeek) -> List[Volunteer]:
-        return self.schedule.get(day, {}).get(shift.time_period, {}).get(shift, [])
+        return self.schedule.s.get(day, {}).get(shift.time_period, {}).get(shift, [])
 
     def has_shift_minimum(self, shift: Shift, day: DayOfWeek) -> bool:
         return len(self._vols_in_shift(shift, day)) >= shift.min_people
@@ -210,7 +218,7 @@ class Schedule:
                         reached its maximum number of {volunteer.max_number_of_shifts} shifts on {day.name}
                         """
 
-        assigned = self.schedule.get(day, {}).get(shift.time_period, {}).get(shift, [])
+        assigned = self.schedule.s.get(day, {}).get(shift.time_period, {}).get(shift, [])
         if shift.max_people is not None and len(assigned) >= shift.max_people:
             return f"shift {shift.name!r} on {day.name} at max capacity ({shift.max_people})"
         return None
@@ -227,14 +235,14 @@ class Schedule:
             return False
 
         # ensure structure exists
-        if shift.time_period not in self.schedule[day]:
-            self.schedule[day][shift.time_period] = {}
-        if shift not in self.schedule[day][shift.time_period]:
-            self.schedule[day][shift.time_period][shift] = []
+        if shift.time_period not in self.schedule.s[day]:
+            self.schedule.s[day][shift.time_period] = {}
+        if shift not in self.schedule.s[day][shift.time_period]:
+            self.schedule.s[day][shift.time_period][shift] = []
         # idempotent
-        if volunteer in self.schedule[day][shift.time_period][shift]:
+        if volunteer in self.schedule.s[day][shift.time_period][shift]:
             return True
-        self.schedule[day][shift.time_period][shift].append(volunteer)
+        self.schedule.s[day][shift.time_period][shift].append(volunteer)
         self.vols_shifts[volunteer][day][shift.time_period] = shift
         return True
 
@@ -243,10 +251,13 @@ class Schedule:
     # ----------------------
     def iter_assignments(self) -> Iterable[tuple]:
         """Yield (day, time_period, shift, tuple(volunteers))"""
-        for day, tp_map in self.schedule.items():
+        for day, tp_map in self.schedule.s.items():
             for tp, shift_map in tp_map.items():
                 for shift, vols in shift_map.items():
                     yield day, tp, shift, tuple(vols)
+
+    def snapshot(self) -> ScheduleGrid:
+        return deepcopy(self.schedule)
 
     # ----------------------
     # Printing/Debugging
@@ -261,7 +272,7 @@ class Schedule:
             lines.append(f"{day.name.title()} ({day.value})")
             lines.append("=" * 60)
 
-            tp_map = self.schedule.get(day, {})
+            tp_map = self.schedule.s.get(day, {})
 
             if not tp_map:
                 lines.append("  No time periods")
@@ -331,7 +342,6 @@ class Schedule:
     def pretty_print(self, *, include_empty: bool = True) -> None:
         """Print the formatted schedule."""
         print(self.pretty(include_empty=include_empty))
-
 
     def __str__(self) -> str:
         return self.pretty()

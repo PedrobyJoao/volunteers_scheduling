@@ -65,3 +65,7 @@ The first version consists in:
 
 1. Input of two YAML files: volunteers info and shifts info
 2. Output of a google spreadsheet with the weekly schedule
+
+## v2
+
+Probably typescript with a simple webapp

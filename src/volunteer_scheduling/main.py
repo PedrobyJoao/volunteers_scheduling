@@ -4,11 +4,13 @@ from . import parser
 
 
 def main():
-  obj = parser.parse("data.yml")
-  week_schedule = schedule_2.generate_schedule(obj.shifts, obj.volunteers, obj.time_periods)
-  # sheets.write_pretty_schedule_xlsx(week_schedule, obj.time_periods)
-  week_schedule.pretty_print()
-  week_schedule.pretty_days_off()
-
+    obj = parser.parse("data.yml")
+    week_schedule = schedule_2.generate_schedule(obj.shifts, obj.volunteers, obj.time_periods)
+    week_schedule.pretty_print()
+    print()
+    week_schedule.pretty_days_off()
+    print()
+    print("Writing to xlsx")
+    sheets.write_pretty_schedule_xlsx(week_schedule.snapshot(), obj.volunteers, obj.time_periods)
 
 main()
