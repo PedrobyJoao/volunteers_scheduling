@@ -371,12 +371,12 @@ def generate_schedule(all_shifts: List['Shift'], volunteers: List['Volunteer'], 
     vols_with_days_off = assign_days_offs(all_shifts, volunteers)
 
     joker_shift = Shift(
-        name="Other",
+        name="Others (horticulture, construction...)",
         min_people=0,
         max_people=100,
         unoperational_days=(),
         time_period=TimePeriod(
-            name="Other",
+            name="Other (to be assigned in the meeting)",
             start=time(7, 0),
             end=time(21, 0)
         )
