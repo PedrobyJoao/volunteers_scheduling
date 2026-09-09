@@ -202,7 +202,6 @@ class Schedule:
           [x] unavailable time periods respected
           [] volunteer fixed_shift respected (if set, must match shift.name)
         """
-
         if not self._shift_operational_on_day(shift, day):
             return f"shift {shift.name!r} not operational on {day.name}"
         if day.value in volunteer.days_off:
@@ -470,6 +469,7 @@ def assign_weekend_day_off(shifts: List[Shift],
                 fixed_shift=vol.fixed_shift,
                 desired_work=vol.desired_work,
                 max_days_off=vol.max_days_off,
+                max_number_of_shifts=vol.max_number_of_shifts,
                 unavailable_periods=vol.unavailable_periods
                     )
             vols.append(new_vol)
