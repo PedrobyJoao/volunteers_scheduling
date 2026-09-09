@@ -2,6 +2,9 @@
 TODOs:
 [] test prefered shifts
 [] warning when typos, wrong fields in yaml
+[] min num of people for days off must also depend on the number of shifts?
+for now, we just have to manually move this people days off to Sunday, and put them in
+the Others of another day
 
 
 DONE:
@@ -44,10 +47,11 @@ class DayOfWeek(Enum):
     SUNDAY = "Sunday"
 
 # todo: this should be described by the yaml instead
+# todo: accept input with different letter cases
 class WorkType(Enum):
-    kitchen = "kitchen"
-    housekeeping = "housekeeping"
-    others = "others"
+    kitchen = "Kitchen"
+    housekeeping = "Housekeeping"
+    others = "Others"
 
 class TimePeriod(BaseModel):
     model_config = ConfigDict(frozen=True)
@@ -62,12 +66,12 @@ class Shift(BaseModel):
     work_type: WorkType = WorkType.others
     min_people: int
     max_people: int
-    unoperational_days: tuple[str, ...]
+    unoperational_days: tuple[DayOfWeek, ...]
 
 class Volunteer(BaseModel):
     model_config = ConfigDict(frozen=True)
     name: str
-    days_off: tuple[str, ...] = ()
+    days_off: tuple[DayOfWeek, ...] = ()
     fixed_shift: str = "" # for people only working on the same thing (e.g.: construction, agriculture)
     desired_work: tuple[WorkType, ...] = ()
     unavailable_periods: tuple[TimePeriod, ...] = ()
@@ -330,6 +334,11 @@ class Schedule:
     def __str__(self) -> str:
         return self.pretty()
 
+    def pretty_days_off(self):
+        for vol in self.vols_shifts:
+            print(vol.name, list(map(lambda day: day.name, vol.days_off)))
+
+
 
 """
 Considering only required shifts (forget about importance for now):
@@ -381,17 +390,18 @@ def generate_schedule(all_shifts: List['Shift'], volunteers: List['Volunteer'], 
                     if shift.work_type in vol.desired_work:
                         sched.assign(vol, day, shift)
 
+                error_msg = f"Failed to fulfill minimum for shift {shift.name} in time period {time_period.name}, day {day.name}"
                 # 2. if not minimum fulfilled, assign any other volunteer available
                 while not sched.has_shift_minimum(shift, day):
                     available_vols_others = sched.available_vols_tp_day(day, time_period)
                     if not available_vols_others:
-                        raise Exception(f"Failed to fulfill minimum for shift {shift.name} in time period {time_period.name}")
+                        raise Exception(error_msg)
                     vol = random.choice(available_vols_others)
                     sched.assign(vol, day, shift)
 
                 # 3. final validation
                 if not sched.has_shift_minimum(shift, day):
-                    raise Exception(f"Failed to fulfill minimum for shift {shift.name} in time period {time_period.name}")
+                    raise Exception(error_msg)
 
         # 3. if there are still volunteers in the day pool, assign them to Other shift
         for vol in sched.available_vols_day(day):
@@ -409,7 +419,6 @@ def assign_days_offs(shifts: List[Shift], volunteers: List[Volunteer]) -> List[V
     but for weekdays, we need to distribute them randomly
     """
     random.shuffle(volunteers)
-
     # Sunday first
     vols_sun = assign_weekend_day_off(shifts, DayOfWeek.SUNDAY, volunteers)
 
@@ -433,6 +442,7 @@ def assign_weekend_day_off(shifts: List[Shift],
                            day: DayOfWeek, volunteers: List[Volunteer]) -> List[Volunteer]:
     off_count = 0
     max_off_day = max(0, max_vols_off(shifts, day, len(volunteers)))
+    print(f"Assigning {day.name} day off to {max_off_day} volunteers")
     vols : List[Volunteer] = []
 
     for vol in volunteers:
@@ -440,8 +450,8 @@ def assign_weekend_day_off(shifts: List[Shift],
             vols.append(vol)
             continue
 
-        if day.name not in vol.days_off:
-            days_off = vol.days_off + (day.value,)
+        if day.name not in vol.days_off and off_count < max_off_day:
+            days_off = vol.days_off + (day,)
             new_vol = Volunteer(
                 name=vol.name,
                 days_off=days_off,
@@ -451,22 +461,23 @@ def assign_weekend_day_off(shifts: List[Shift],
                 unavailable_periods=vol.unavailable_periods
                     )
             vols.append(new_vol)
+        else:
+            vols.append(vol)
 
         off_count += 1
 
-        if off_count >= max_off_day:
-            break
-
     return vols
 
-def min_needed_level3(shifts: List[Shift], day: DayOfWeek) -> int:
-    """min number of volunteers for level3 shifts"""
+def min_vols_needed(shifts: List[Shift], day: DayOfWeek) -> int:
+    """min number of volunteers for shifts"""
     n = 0
     for shift in shifts:
-        if day.name in shift.unoperational_days:
+        if day in shift.unoperational_days:
             continue
+        n += shift.min_people
     return n
 
 def max_vols_off(shifts: List[Shift], day: DayOfWeek, total_vols: int) -> int:
     """how many volunteers can get day off this day"""
-    return total_vols - min_needed_level3(shifts, day)
+    print(f"total_vols {total_vols} and min_vols_needed {min_vols_needed(shifts, day)}")
+    return total_vols - min_vols_needed(shifts, day)

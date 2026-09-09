@@ -8,6 +8,7 @@ def main():
   week_schedule = schedule_2.generate_schedule(obj.shifts, obj.volunteers, obj.time_periods)
   # sheets.write_pretty_schedule_xlsx(week_schedule, obj.time_periods)
   week_schedule.pretty_print()
+  week_schedule.pretty_days_off()
 
 
 main()
