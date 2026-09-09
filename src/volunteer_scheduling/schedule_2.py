@@ -1,26 +1,21 @@
 """
 TODOs:
 [] volunteer available time periods
-[x] shift operational on day
-[x] volunteer not on day off
-[x] volunteer fixed_shift respected (if set, must match shift.name)
+[] volunteer custom number of shifts
+
+done:
+
 [x] only one shift per time period
 [x] at most 2 shifts per day for volunteer
 [x] shift capacity (max_people)
-[] for remaining volunteers without shifts assigned, assign them to shift Others
-[] verify if all volunteers were assigned
-[] assign days off if not assigned yet
-[] ignore preferences when minimum quote is not reached for level 3 shifts
-[] Min people needed for the shift
-[] return error if no volunteers were filled
-[] Check volunteers' days off
-[] only one shift per phase of day
-[] two shifts per day per volunteer
-[] volunteer preferences of days phase
-[] Preferences of shifts
-[] consider that one of the day phases might be required for everyone
-(as now it's considered early morning required)
-[] use pydantic
+[x] for remaining volunteers without shifts assigned, assign them to shift Others
+[x] verify if all volunteers were assigned
+[x] assign days off if not assigned yet
+[x] Check volunteers' days off
+[x] Min people needed for the shift
+[x] Preferences of shifts
+[x] ignore preferences when minimum quote is not reached
+[x] return error if no volunteers were filled
 """ 
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Iterable
@@ -137,18 +132,6 @@ class Schedule:
                 return True
         return False
 
-    def find_volunteer_assignments(self, volunteer: 'Volunteer') -> Dict[DayOfWeek, List['Shift']]:
-        result: Dict[DayOfWeek, List['Shift']] = {}
-        for day, tp_map in self.schedule.items():
-            assigned = []
-            for shifts in tp_map.values():
-                for shift, vols in shifts.items():
-                    if volunteer in vols:
-                        assigned.append(shift)
-            if assigned:
-                result[day] = assigned
-        return result
-
     def available_vols_day(self, day: DayOfWeek) -> List[Volunteer]:
         vols = []
         for vol in self.vols_shifts:
@@ -190,10 +173,10 @@ class Schedule:
         Enforces:
           [x] shift operational on day
           [x] volunteer not on day off
-          [x] volunteer fixed_shift respected (if set, must match shift.name)
           [x] only one shift per time period
           [x] at most 2 shifts per day for volunteer
           [x] shift capacity (max_people)
+          [] volunteer fixed_shift respected (if set, must match shift.name)
         """
 
         if not self._shift_operational_on_day(shift, day):
@@ -234,35 +217,6 @@ class Schedule:
         self.schedule[day][shift.time_period][shift].append(volunteer)
         self.vols_shifts[volunteer][day][shift.time_period] = shift
         return True
-
-    # ----------------------
-    # Validation functions
-    # ----------------------
-    def validate_minima(self) -> List[str]:
-        """
-        Return list of problems where shift.min_people is not met.
-        Each item is a short string describing the problem.
-        """
-        problems: List[str] = []
-        for day, tp_map in self.schedule.items():
-            for shift_map in tp_map.values():
-                for shift, vols in shift_map.items():
-                    # if shift is unoperational this day we skip (shouldn't be present, but safe)
-                    if not self._shift_operational_on_day(shift, day):
-                        continue
-                    if shift.min_people is not None and len(vols) < shift.min_people:
-                        problems.append(f"{day.name}: shift {shift.name!r} needs {shift.min_people} but has {len(vols)}")
-        return problems
-
-    def unassigned_volunteers(self, all_volunteers: List['Volunteer']) -> List['Volunteer']:
-        # TODO: not sure if so useful
-        """Return list of volunteers that have zero assignments in the week (ignoring those with days_off covering full week)."""
-        result: List['Volunteer'] = []
-        for vol in all_volunteers:
-            assigns = self.find_volunteer_assignments(vol)
-            if not assigns:
-                result.append(vol)
-        return result
 
     # ----------------------
     # Utility readers for printing/reporting
@@ -368,7 +322,7 @@ class Schedule:
 """
 Considering only required shifts (forget about importance for now):
 
-1. assign all required shifts to the minium, first considering preferences, fallback to
+1. assign all shifts to the minium, first considering preferences, fallback to
 getting random volunteers
 
 2. if there are still volunteers without their required num of shifts, 
@@ -493,6 +447,3 @@ def min_needed_level3(shifts: List[Shift], day: DayOfWeek) -> int:
 def max_vols_off(shifts: List[Shift], day: DayOfWeek, total_vols: int) -> int:
     """how many volunteers can get day off this day"""
     return total_vols - min_needed_level3(shifts, day)
-
-# PRINTING
-
