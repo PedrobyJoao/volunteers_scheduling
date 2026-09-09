@@ -46,7 +46,6 @@ class TimePeriod(BaseModel):
     name: str
     start: time
     end: time
-    required: bool = False # if all volunteers are required to work on this time period
 
 class Shift(BaseModel):
     model_config = ConfigDict(frozen=True)
@@ -260,12 +259,10 @@ class Schedule:
                 if not include_empty and not shift_map:
                     continue
 
-                required_label = " [required]" if time_period.required else ""
 
                 lines.append(
                     f"\n  {time_period.name} "
                     f"({time_period.start:%H:%M}–{time_period.end:%H:%M})"
-                    f"{required_label}"
                 )
 
                 if not shift_map:
