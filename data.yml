@@ -53,8 +53,15 @@ volunteers:
 
   - name: Grace
     desired_shifts: ["Misc", "Cleaning"]
-    days_off: ["Thu", "Fri"]
+    days_off: ["Fri"]
+    max_days_off: 1
 
   - name: Henry
     desired_shifts: ["Kitchen"]
     days_off: ["Mon", "Sat"]
+
+  - name: Ian
+    max_days_off: 1
+
+  - name: Eden
+    max_number_of_shifts: 1
