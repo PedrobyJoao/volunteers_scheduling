@@ -16,28 +16,34 @@ shifts:
   - name: Breakfast
     time_period: Early Morning
     min_people: 2
+    work_type: "Kitchen"
 
   - name: Lunch
     time_period: Late Morning
     min_people: 3
     unoperational_days: ["Sunday"]
+    work_type: "Kitchen"
 
   - name: Dinner
     time_period: Afternoon
     min_people: 3
+    work_type: "Kitchen"
     unoperational_days: ["Friday", "Saturday"]
 
   - name: Shared spaces cleaning
     time_period: Late Morning
+    work_type: "Housekeeping"
     min_people: 1
 
   - name: Watering
     time_period: Early Morning
+    work_type: "Outdoor"
     min_people: 1
 
   - name: Chickens
     time_period: Early Morning
     min_people: 1
+    work_type: "Outdoor"
 
 volunteers:
   - name: Carol
@@ -69,6 +75,7 @@ volunteers:
   - name: Carlo
   - name: Marco
   - name: Aristoteles
+    desired_work: ["Outdoor"]
   - name: Platao
   - name: Socrates
   - name: Ada Lovelace

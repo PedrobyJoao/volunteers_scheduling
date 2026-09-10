@@ -58,6 +58,7 @@ class DayOfWeek(Enum):
 class WorkType(Enum):
     kitchen = "Kitchen"
     housekeeping = "Housekeeping"
+    outdoor = "Outdoor"
     others = "Others"
 
 class TimePeriod(BaseModel):
@@ -396,12 +397,13 @@ def generate_schedule(all_shifts: List['Shift'], volunteers: List['Volunteer'], 
                 print(f"Assigning shift {shift.name}")
                 # 1. fill only volunteers with preferences
                 all_available = iter(sched.available_vols_tp_day(day, time_period))
-                while sched.has_shift_minimum(shift, day):
+                while not sched.has_shift_minimum(shift, day):
                     try:
                         vol = next(all_available)
                     except StopIteration:
                         break
                     if shift.work_type in vol.desired_work:
+                        print(f"Preferences: Assigning {vol.name} to {shift.name}")
                         sched.assign(vol, day, shift)
 
                 error_msg = f"Failed to fulfill minimum for shift {shift.name} in time period {time_period.name}, day {day.name}"
