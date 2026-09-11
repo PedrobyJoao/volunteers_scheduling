@@ -39,7 +39,6 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Iterable
 from pydantic import BaseModel, ConfigDict
 from datetime import time
-from copy import deepcopy
 from enum import Enum
 from copy import deepcopy
 import random
@@ -429,19 +428,19 @@ def assign_days_offs(shifts: List[Shift], volunteers: List[Volunteer]) -> List[V
     TODO: days off are being concentrated in a few days which is ok for Saturday and Sunday
     but for weekdays, we need to distribute them randomly
     """
-    random.shuffle(volunteers)
+    volunteers = random.sample(volunteers, len(volunteers))
     # Sunday first
-    vols_sun = assign_weekend_day_off(shifts, DayOfWeek.SUNDAY, volunteers)
+    vols_sun = assign_greedy_day_off(shifts, DayOfWeek.SUNDAY, volunteers)
 
     # weekdays (todo randomize)
     days: List[DayOfWeek] = [DayOfWeek.MONDAY, DayOfWeek.TUESDAY, DayOfWeek.WEDNESDAY, DayOfWeek.THURSDAY, DayOfWeek.FRIDAY]
     random.shuffle(days)
     assigned_weekdays_vols = deepcopy(vols_sun)
     for day in days:
-        assigned_weekdays_vols = assign_weekend_day_off(shifts, day, assigned_weekdays_vols)
+        assigned_weekdays_vols = assign_greedy_day_off(shifts, day, assigned_weekdays_vols)
 
     # Saturday
-    assigned_saturday = assign_weekend_day_off(shifts, DayOfWeek.SATURDAY, assigned_weekdays_vols)
+    assigned_saturday = assign_greedy_day_off(shifts, DayOfWeek.SATURDAY, assigned_weekdays_vols)
 
     for v in assigned_saturday:
         if len(v.days_off) != v.max_days_off:
@@ -449,7 +448,7 @@ def assign_days_offs(shifts: List[Shift], volunteers: List[Volunteer]) -> List[V
 
     return assigned_saturday 
 
-def assign_weekend_day_off(shifts: List[Shift],
+def assign_greedy_day_off(shifts: List[Shift],
                            day: DayOfWeek, volunteers: List[Volunteer]) -> List[Volunteer]:
     off_count = 0
     max_off_day = max(0, max_vols_off(shifts, day, len(volunteers)))
@@ -457,28 +456,34 @@ def assign_weekend_day_off(shifts: List[Shift],
     vols : List[Volunteer] = []
 
     for vol in volunteers:
-        if len(vol.days_off) == vol.max_days_off:
+        if day in vol.days_off:
+            vols.append(vol)
+            off_count += 1
+        elif len(vol.days_off) == vol.max_days_off:
             vols.append(vol)
             continue
-
-        if day.name not in vol.days_off and off_count < max_off_day:
-            days_off = vol.days_off + (day,)
-            new_vol = Volunteer(
-                name=vol.name,
-                days_off=days_off,
-                fixed_shift=vol.fixed_shift,
-                desired_work=vol.desired_work,
-                max_days_off=vol.max_days_off,
-                max_number_of_shifts=vol.max_number_of_shifts,
-                unavailable_periods=vol.unavailable_periods
-                    )
+        elif off_count < max_off_day:
+            new_vol = assign_day_off(vol, day)
             vols.append(new_vol)
+            off_count += 1
         else:
             vols.append(vol)
 
-        off_count += 1
-
     return vols
+
+def assign_day_off(vol: Volunteer, day: DayOfWeek) -> Volunteer:
+    if day in vol.days_off:
+        return vol
+    days_off = vol.days_off + (day,)
+    return Volunteer(
+        name=vol.name,
+        days_off=days_off,
+        fixed_shift=vol.fixed_shift,
+        desired_work=vol.desired_work,
+        max_days_off=vol.max_days_off,
+        max_number_of_shifts=vol.max_number_of_shifts,
+        unavailable_periods=vol.unavailable_periods
+            )
 
 def min_vols_needed(shifts: List[Shift], day: DayOfWeek) -> int:
     """min number of volunteers for shifts"""
