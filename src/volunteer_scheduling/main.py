@@ -4,7 +4,7 @@ from . import parser
 
 
 def main():
-    obj = parser.parse("data.yml")
+    obj = parser.parse("real_data.yml")
     week_schedule = schedule_2.generate_schedule(obj.shifts, obj.volunteers, obj.time_periods)
     week_schedule.pretty_print()
     print()
