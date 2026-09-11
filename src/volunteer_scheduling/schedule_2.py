@@ -58,7 +58,6 @@ class DayOfWeek(Enum):
 class WorkType(Enum):
     kitchen = "Kitchen"
     housekeeping = "Housekeeping"
-    outdoor = "Outdoor"
     others = "Others"
 
 class TimePeriod(BaseModel):
@@ -159,6 +158,7 @@ class Schedule:
             fulfilled_max_shifts = len(self.vols_shifts[vol][day]) >= vol.max_number_of_shifts
             if day not in vol.days_off and not fulfilled_max_shifts:
                 vols.append(vol)
+        random.shuffle(vols)
         return deepcopy(vols)
 
     def available_vols_tp_day(self, day: DayOfWeek, tp: TimePeriod) -> List[Volunteer]:
@@ -171,16 +171,11 @@ class Schedule:
                 and not already_has_tp 
                 and not tp in vol.unavailable_periods):
                 vols.append(vol)
+        random.shuffle(vols)
         return deepcopy(vols)
 
     def shifts_in_day_tp(self, day: DayOfWeek, tp: TimePeriod) -> List[Shift]:
         return deepcopy([shift for shift in self.schedule.s.get(day, {}).get(tp, {}).keys()])
-
-    def shifts_in_day(self, day: DayOfWeek) -> List[Shift]:
-        shifts : List[Shift] = []
-        for tp_map in self.schedule.s.get(day, {}).values():
-            shifts.extend(tp_map.keys())
-        return deepcopy(shifts)
 
     def _vols_in_shift(self, shift: Shift, day: DayOfWeek) -> List[Volunteer]:
         return self.schedule.s.get(day, {}).get(shift.time_period, {}).get(shift, [])
