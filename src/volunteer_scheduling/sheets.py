@@ -261,7 +261,7 @@ def write_pretty_schedule_xlsx(
                 cell.alignment = left_aligned
 
                 if day in shift.unoperational_days:
-                    cell.value = "UNOPERATIONAL"
+                    cell.value = "N/A"
                     cell.fill = unoperational_fill
                     cell.font = Font(
                         color="9C0006",
