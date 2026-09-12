@@ -6,13 +6,13 @@ from openpyxl.cell.cell import MergedCell
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
-from . import schedule_2
+from . import schedule
 
 
 def write_pretty_schedule_xlsx(
-    grid: schedule_2.ScheduleGrid,
-    volunteers: List[schedule_2.Volunteer],
-    time_periods: List[schedule_2.TimePeriod],
+    grid: schedule.ScheduleGrid,
+    volunteers: List[schedule.Volunteer],
+    time_periods: List[schedule.TimePeriod],
     output_path: Union[str, Path] = "schedule.xlsx",
 ) -> None:
     """
@@ -34,7 +34,7 @@ def write_pretty_schedule_xlsx(
 
     schedule_grid = grid.s
 
-    days = list(schedule_2.DayOfWeek)
+    days = list(schedule.DayOfWeek)
 
     # ---------------------------------------------------------
     # Styles
@@ -164,7 +164,7 @@ def write_pretty_schedule_xlsx(
     # Find all shifts represented in the schedule
     # ---------------------------------------------------------
 
-    all_shifts: List[schedule_2.Shift] = []
+    all_shifts: List[schedule.Shift] = []
     seen_shifts = set()
 
     for day_schedule in schedule_grid.values():
