@@ -2,17 +2,6 @@
 TODOs:
 [] test prefered shifts
 [] warning when typos, wrong fields in yaml
-[] improve schedule algorithm
-    [] first assign volunteers with preferred shifts to their shifts because
-    it's happening that preferred shifts are assigned yes but the algorithm
-    is not giving much weight to it. Bob preferring A gets A sometimes, Alice
-    without preference also gets A, Bob should get A always?
-[] improve days off algorithm
-    [] most people possible on Sunday and then split days off equally
-    in the week days, lastly assign saturday
-    [] min num of people for days off must also depend on the number of shifts?
-    for now, we just have to manually move this people days off to Sunday, and put them in
-    the Others of another day
 
 DONE:
 
@@ -34,9 +23,15 @@ Algorithm:
 [x] ignore preferences when minimum quote is not reached
 [x] for remaining volunteers without shifts assigned, assign them to shift Others
 [x] verify if all volunteers were assigned
+[] CP-SAT:
+    [x] very good constraint satisfaction of everything literally
+    [x] days off equally spread throughout weekdays and saturday
 """ 
+from __future__ import annotations
+
+from ortools.sat.python import cp_model
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Iterable
+from typing import Dict, List, Optional, Iterable, Any, Iterable
 from pydantic import BaseModel, ConfigDict
 from datetime import time
 from enum import Enum
@@ -64,6 +59,7 @@ class TimePeriod(BaseModel):
     name: str
     start: time
     end: time
+    required: bool = False
 
 class Shift(BaseModel):
     model_config = ConfigDict(frozen=True)
@@ -348,153 +344,1161 @@ class Schedule:
             print(vol.name, list(map(lambda day: day.name, vol.days_off)))
 
 
-
-"""
-Considering only required shifts (forget about importance for now):
-
-1. assign all shifts to the minium, first considering preferences, fallback to
-getting random volunteers
-
-2. if there are still volunteers without their required num of shifts, 
-   assign them to a joker shift
-
-Them managers should handle people in Others manually.
-"""
-def generate_schedule(all_shifts: List['Shift'], volunteers: List['Volunteer'], time_periods: List['TimePeriod']) -> Schedule:
-    print("Assigning days off")
-    random.shuffle(volunteers) # for fairness
-    vols_with_days_off = assign_days_offs(all_shifts, volunteers)
-
-    joker_shift = Shift(
-        name="Others (horticulture, construction...)",
-        min_people=0,
-        max_people=100,
-        unoperational_days=(),
-        time_period=TimePeriod(
-            name="Other (to be assigned in the meeting)",
-            start=time(7, 0),
-            end=time(21, 0)
-        )
-    )
-    all_shifts.append(joker_shift)
-
-    print("Initiating schedule")
-    sched = Schedule(all_shifts, vols_with_days_off, time_periods)
+class ScheduleGenerationError(RuntimeError):
+    """Raised when no feasible schedule can satisfy all hard constraints."""
 
 
-    for day in list(DayOfWeek):
-        print(f"Assigning day {day.name}")
-        for time_period in time_periods:
-            print(f"Assigning time period {time_period.name}")
-            shifts = sched.shifts_in_day_tp(day, time_period)
-            for shift in shifts:
-                print(f"Assigning shift {shift.name}")
-                # 1. fill only volunteers with preferences
-                all_available = iter(sched.available_vols_tp_day(day, time_period))
-                while not sched.has_shift_minimum(shift, day):
-                    try:
-                        vol = next(all_available)
-                    except StopIteration:
-                        break
-                    if shift.work_type in vol.desired_work:
-                        print(f"Preferences: Assigning {vol.name} to {shift.name}")
-                        sched.assign(vol, day, shift)
-
-                error_msg = f"Failed to fulfill minimum for shift {shift.name} in time period {time_period.name}, day {day.name}"
-                # 2. if not minimum fulfilled, assign any other volunteer available
-                while not sched.has_shift_minimum(shift, day):
-                    available_vols_others = sched.available_vols_tp_day(day, time_period)
-                    if not available_vols_others:
-                        raise Exception(error_msg)
-                    vol = random.choice(available_vols_others)
-                    sched.assign(vol, day, shift)
-
-                # 3. final validation
-                if not sched.has_shift_minimum(shift, day):
-                    raise Exception(error_msg)
-
-        # 3. if there are still volunteers in the day pool, assign them to Other shift
-        for vol in sched.available_vols_day(day):
-            sched.assign(vol, day, joker_shift)
-
-    return sched
-
-
-def assign_days_offs(shifts: List[Shift], volunteers: List[Volunteer]) -> List[Volunteer]:
+@dataclass(frozen=True)
+class SolverConfiguration:
     """
-    TODO!!!: volunteers.days_off is now immutable so we had to deal with new vars,
-    maybe find another way
+    CP-SAT settings.
 
-    TODO: days off are being concentrated in a few days which is ok for Saturday and Sunday
-    but for weekdays, we need to distribute them randomly
+    A value of None for max_time_seconds means no explicit time limit.
+    For the current schedule size, solving should normally be quick.
     """
-    volunteers = random.sample(volunteers, len(volunteers))
-    # Sunday first
-    vols_sun = assign_greedy_day_off(shifts, DayOfWeek.SUNDAY, volunteers)
 
-    # weekdays (todo randomize)
-    days: List[DayOfWeek] = [DayOfWeek.MONDAY, DayOfWeek.TUESDAY, DayOfWeek.WEDNESDAY, DayOfWeek.THURSDAY, DayOfWeek.FRIDAY]
-    random.shuffle(days)
-    assigned_weekdays_vols = deepcopy(vols_sun)
-    for day in days:
-        assigned_weekdays_vols = assign_greedy_day_off(shifts, day, assigned_weekdays_vols)
+    max_time_seconds: Optional[float] = 60.0
+    num_search_workers: int = 8
+    log_search_progress: bool = False
 
-    # Saturday
-    assigned_saturday = assign_greedy_day_off(shifts, DayOfWeek.SATURDAY, assigned_weekdays_vols)
 
-    for v in assigned_saturday:
-        if len(v.days_off) != v.max_days_off:
-            raise RuntimeError(f"{v.name} ended with {len(v.days_off)} days off (expected {v.max_days_off})")
+def _is_shift_operational(shift: Shift, day: DayOfWeek) -> bool:
+    """
+    Return whether a real shift operates on the given day.
 
-    return assigned_saturday 
+    Pydantic should normally convert YAML values into DayOfWeek members,
+    but the string fallback makes this tolerant of already-created objects.
+    """
 
-def assign_greedy_day_off(shifts: List[Shift],
-                           day: DayOfWeek, volunteers: List[Volunteer]) -> List[Volunteer]:
-    off_count = 0
-    max_off_day = max(0, max_vols_off(shifts, day, len(volunteers)))
-    print(f"Assigning {day.name} day off to {max_off_day} volunteers")
-    vols : List[Volunteer] = []
-
-    for vol in volunteers:
-        if day in vol.days_off:
-            vols.append(vol)
-            off_count += 1
-        elif len(vol.days_off) == vol.max_days_off:
-            vols.append(vol)
+    for unoperational_day in shift.unoperational_days:
+        if isinstance(unoperational_day, DayOfWeek):
+            if unoperational_day == day:
+                return False
             continue
-        elif off_count < max_off_day:
-            new_vol = assign_day_off(vol, day)
-            vols.append(new_vol)
-            off_count += 1
-        else:
-            vols.append(vol)
 
-    return vols
+        normalized = str(unoperational_day).strip().lower()
 
-def assign_day_off(vol: Volunteer, day: DayOfWeek) -> Volunteer:
-    if day in vol.days_off:
-        return vol
-    days_off = vol.days_off + (day,)
-    return Volunteer(
-        name=vol.name,
-        days_off=days_off,
-        fixed_shift=vol.fixed_shift,
-        desired_work=vol.desired_work,
-        max_days_off=vol.max_days_off,
-        max_number_of_shifts=vol.max_number_of_shifts,
-        unavailable_periods=vol.unavailable_periods
+        if normalized in {
+            day.name.lower(),
+            day.value.lower(),
+        }:
+            return False
+
+    return True
+
+
+def _validate_solver_input(
+    shifts: list[Shift],
+    volunteers: list[Volunteer],
+    time_periods: list[TimePeriod],
+) -> None:
+    if not volunteers:
+        raise ScheduleGenerationError(
+            "Cannot generate a schedule without volunteers."
+        )
+
+    if not time_periods:
+        raise ScheduleGenerationError(
+            "Cannot generate a schedule without time periods."
+        )
+
+    volunteer_names: set[str] = set()
+
+    for volunteer in volunteers:
+        if volunteer.name in volunteer_names:
+            raise ScheduleGenerationError(
+                f"Duplicate volunteer name: {volunteer.name!r}"
             )
 
-def min_vols_needed(shifts: List[Shift], day: DayOfWeek) -> int:
-    """min number of volunteers for shifts"""
-    n = 0
-    for shift in shifts:
-        if day in shift.unoperational_days:
-            continue
-        n += shift.min_people
-    return n
+        volunteer_names.add(volunteer.name)
 
-def max_vols_off(shifts: List[Shift], day: DayOfWeek, total_vols: int) -> int:
-    """how many volunteers can get day off this day"""
-    print(f"total_vols {total_vols} and min_vols_needed {min_vols_needed(shifts, day)}")
-    return total_vols - min_vols_needed(shifts, day)
+        requested_days_off = set(volunteer.days_off)
+
+        if len(requested_days_off) != len(volunteer.days_off):
+            raise ScheduleGenerationError(
+                f"{volunteer.name!r} has duplicate requested days off."
+            )
+
+        if len(requested_days_off) > volunteer.max_days_off:
+            raise ScheduleGenerationError(
+                f"{volunteer.name!r} requested "
+                f"{len(requested_days_off)} days off, but "
+                f"max_days_off is {volunteer.max_days_off}."
+            )
+
+        if volunteer.max_days_off < 0:
+            raise ScheduleGenerationError(
+                f"{volunteer.name!r} has a negative max_days_off."
+            )
+
+        if volunteer.max_days_off > len(DayOfWeek):
+            raise ScheduleGenerationError(
+                f"{volunteer.name!r} requests "
+                f"{volunteer.max_days_off} days off, but a week has "
+                f"{len(DayOfWeek)} days."
+            )
+
+        if volunteer.max_number_of_shifts < 0:
+            raise ScheduleGenerationError(
+                f"{volunteer.name!r} has a negative "
+                f"max_number_of_shifts."
+            )
+
+    time_period_names: set[str] = set()
+
+    for time_period in time_periods:
+        if time_period.name in time_period_names:
+            raise ScheduleGenerationError(
+                f"Duplicate time-period name: {time_period.name!r}"
+            )
+
+        time_period_names.add(time_period.name)
+
+    shift_names: set[str] = set()
+
+    for shift in shifts:
+        if shift.name in shift_names:
+            raise ScheduleGenerationError(
+                f"Duplicate shift name: {shift.name!r}"
+            )
+
+        shift_names.add(shift.name)
+
+        if shift.min_people < 0:
+            raise ScheduleGenerationError(
+                f"Shift {shift.name!r} has negative min_people."
+            )
+
+        if shift.time_period not in time_periods:
+            raise ScheduleGenerationError(
+                f"Shift {shift.name!r} references time period "
+                f"{shift.time_period.name!r}, which is not present in "
+                f"the top-level time_periods list."
+            )
+
+    for volunteer in volunteers:
+        for unavailable_period in volunteer.unavailable_periods:
+            if unavailable_period not in time_periods:
+                raise ScheduleGenerationError(
+                    f"Volunteer {volunteer.name!r} references unavailable "
+                    f"time period {unavailable_period.name!r}, which is not "
+                    f"present in the top-level time_periods list."
+                )
+
+
+def _new_solver(
+    configuration: SolverConfiguration,
+) -> cp_model.CpSolver:
+    solver = cp_model.CpSolver()
+
+    solver.parameters.num_search_workers = (
+        configuration.num_search_workers
+    )
+    solver.parameters.log_search_progress = (
+        configuration.log_search_progress
+    )
+
+    if configuration.max_time_seconds is not None:
+        solver.parameters.max_time_in_seconds = (
+            configuration.max_time_seconds
+        )
+
+    return solver
+
+
+def _status_name(status: Any) -> str:
+    if status == cp_model.UNKNOWN:
+        return "UNKNOWN"
+
+    if status == cp_model.MODEL_INVALID:
+        return "MODEL_INVALID"
+
+    if status == cp_model.FEASIBLE:
+        return "FEASIBLE"
+
+    if status == cp_model.INFEASIBLE:
+        return "INFEASIBLE"
+
+    if status == cp_model.OPTIMAL:
+        return "OPTIMAL"
+
+    return getattr(status, "name", str(status))
+
+def _solve_optimization_stage(
+    *,
+    model: cp_model.CpModel,
+    expression: Any,
+    maximize: bool,
+    stage_name: str,
+    configuration: SolverConfiguration,
+    require_optimal: bool = False,
+) -> tuple[cp_model.CpSolver, int]:
+    """
+    Optimize one objective and return its best value.
+
+    The caller adds an equality fixing that value before moving to the
+    next objective. This gives lexicographic optimization.
+    """
+
+    if maximize:
+        model.maximize(expression)
+    else:
+        model.minimize(expression)
+
+    solver = _new_solver(configuration)
+    status = solver.solve(model)
+
+    if status == cp_model.INFEASIBLE:
+        raise ScheduleGenerationError(
+            f"Schedule is infeasible while optimizing: {stage_name}."
+        )
+
+    if status == cp_model.MODEL_INVALID:
+        raise ScheduleGenerationError(
+            f"CP-SAT reported an invalid model while optimizing: "
+            f"{stage_name}."
+        )
+
+    if status == cp_model.UNKNOWN:
+        raise ScheduleGenerationError(
+            f"CP-SAT could not find a schedule while optimizing "
+            f"{stage_name}. Consider increasing max_time_seconds."
+        )
+
+    if require_optimal and status != cp_model.OPTIMAL:
+        raise ScheduleGenerationError(
+            f"CP-SAT found a feasible schedule but could not prove the "
+            f"optimal value for {stage_name}. Solver status: "
+            f"{_status_name(status)}. Increase max_time_seconds or set it "
+            f"to None."
+        )
+
+    value = int(solver.value(expression))
+
+    return solver, value
+
+
+def _create_required_joker_shifts(
+    *,
+    volunteers: list[Volunteer],
+    time_periods: list[TimePeriod],
+) -> dict[int, Shift]:
+    """
+    Create one joker shift for each required time period.
+
+    Dictionary keys are time-period indexes.
+    """
+
+    required_jokers: dict[int, Shift] = {}
+
+    for time_period_index, time_period in enumerate(time_periods):
+        if not time_period.required:
+            continue
+
+        required_jokers[time_period_index] = Shift(
+            name=f"Others — {time_period.name}",
+            time_period=time_period,
+            work_type=WorkType.others,
+            min_people=0,
+            max_people=max(1, len(volunteers)),
+            unoperational_days=(),
+        )
+
+    return required_jokers
+
+
+def _create_general_joker_shifts(
+    *,
+    volunteers: list[Volunteer],
+) -> list[Shift]:
+    """
+    Create enough generic assignment slots to satisfy the largest daily
+    assignment requirement.
+
+    Each joker uses a distinct synthetic time period. This allows one
+    volunteer to have multiple unresolved assignments without violating
+    the one-assignment-per-time-period rule inside Schedule.assign().
+
+    These are explicitly unresolved assignments. Managers must later
+    choose their actual times without creating conflicts.
+    """
+
+    maximum_daily_shifts = max(
+        volunteer.max_number_of_shifts
+        for volunteer in volunteers
+    )
+
+    joker_shifts: list[Shift] = []
+
+    for slot_index in range(maximum_daily_shifts):
+        slot_number = slot_index + 1
+
+        synthetic_period = TimePeriod(
+            name=f"Unassigned joker slot {slot_number}",
+            start=time(0, 0),
+            end=time(0, 0),
+            required=False,
+        )
+
+        joker_shifts.append(
+            Shift(
+                name=f"Others — unassigned slot {slot_number}",
+                time_period=synthetic_period,
+                work_type=WorkType.others,
+                min_people=0,
+                max_people=max(1, len(volunteers)),
+                unoperational_days=(),
+            )
+        )
+
+    return joker_shifts
+
+
+def generate_schedule(
+    all_shifts: list[Shift],
+    volunteers: list[Volunteer],
+    time_periods: list[TimePeriod],
+    *,
+    solver_configuration: Optional[SolverConfiguration] = None,
+) -> Schedule:
+    """
+    Generate a weekly volunteer schedule using CP-SAT.
+
+    Hard constraints:
+      - User-requested days off are mandatory.
+      - Every volunteer gets exactly max_days_off.
+      - Working volunteers receive exactly max_number_of_shifts each day.
+      - A volunteer receives at most one shift in each time period.
+      - Unavailable time periods are respected.
+      - Every operational real shift receives exactly min_people.
+      - Every applicable required period receives exactly one assignment
+        per working and available volunteer.
+      - Required-period surplus goes to that period's joker shift.
+      - Required periods are ignored on days with no operational real
+        shift in that period.
+      - max_people is intentionally not enforced.
+
+    Lexicographic objectives:
+      1. Maximize Sunday days off.
+      2. Balance Monday-Friday days off.
+      3. Minimize Saturday days off.
+      4. Maximize preferred real-shift assignments.
+      5. Minimize general unresolved joker assignments.
+    """
+
+    configuration = (
+        solver_configuration or SolverConfiguration()
+    )
+
+    real_shifts = list(all_shifts)
+    volunteers = list(volunteers)
+    time_periods = list(time_periods)
+    days = list(DayOfWeek)
+
+    _validate_solver_input(
+        shifts=real_shifts,
+        volunteers=volunteers,
+        time_periods=time_periods,
+    )
+
+    required_joker_shifts = _create_required_joker_shifts(
+        volunteers=volunteers,
+        time_periods=time_periods,
+    )
+
+    general_joker_shifts = _create_general_joker_shifts(
+        volunteers=volunteers,
+    )
+
+    model = cp_model.CpModel()
+
+    volunteer_indexes = range(len(volunteers))
+    day_indexes = range(len(days))
+    shift_indexes = range(len(real_shifts))
+    period_indexes = range(len(time_periods))
+    general_joker_indexes = range(len(general_joker_shifts))
+
+    day_index_by_day = {
+        day: day_index
+        for day_index, day in enumerate(days)
+    }
+
+    period_index_by_period = {
+        time_period: period_index
+        for period_index, time_period in enumerate(time_periods)
+    }
+
+    shift_indexes_by_period: dict[int, list[int]] = {
+        period_index: []
+        for period_index in period_indexes
+    }
+
+    for shift_index, shift in enumerate(real_shifts):
+        period_index = period_index_by_period[shift.time_period]
+        shift_indexes_by_period[period_index].append(shift_index)
+
+    # ------------------------------------------------------------
+    # Decision variables
+    # ------------------------------------------------------------
+
+    # off[v, d] = 1 when volunteer v has day d off.
+    off: dict[tuple[int, int], Any] = {}
+
+    # assignment[v, d, s] = 1 when volunteer v works real shift s.
+    assignment: dict[tuple[int, int, int], Any] = {}
+
+    # required_joker[v, d, p] = 1 when volunteer v gets the joker
+    # assignment for required period p.
+    required_joker: dict[tuple[int, int, int], Any] = {}
+
+    # general_joker[v, d, j] = 1 when volunteer v gets unresolved
+    # general joker slot j.
+    general_joker: dict[tuple[int, int, int], Any] = {}
+
+    for volunteer_index in volunteer_indexes:
+        for day_index in day_indexes:
+            off[volunteer_index, day_index] = model.new_bool_var(
+                f"off_v{volunteer_index}_d{day_index}"
+            )
+
+            for shift_index in shift_indexes:
+                assignment[
+                    volunteer_index,
+                    day_index,
+                    shift_index,
+                ] = model.new_bool_var(
+                    f"assign_v{volunteer_index}_"
+                    f"d{day_index}_s{shift_index}"
+                )
+
+            for period_index in required_joker_shifts:
+                required_joker[
+                    volunteer_index,
+                    day_index,
+                    period_index,
+                ] = model.new_bool_var(
+                    f"required_joker_v{volunteer_index}_"
+                    f"d{day_index}_p{period_index}"
+                )
+
+            for joker_index in general_joker_indexes:
+                general_joker[
+                    volunteer_index,
+                    day_index,
+                    joker_index,
+                ] = model.new_bool_var(
+                    f"general_joker_v{volunteer_index}_"
+                    f"d{day_index}_j{joker_index}"
+                )
+
+    # ------------------------------------------------------------
+    # Exact days off and mandatory requested days
+    # ------------------------------------------------------------
+
+    for volunteer_index, volunteer in enumerate(volunteers):
+        model.add(
+            sum(
+                off[volunteer_index, day_index]
+                for day_index in day_indexes
+            )
+            == volunteer.max_days_off
+        )
+
+        for requested_day_off in volunteer.days_off:
+            requested_day_index = day_index_by_day[requested_day_off]
+
+            model.add(
+                off[
+                    volunteer_index,
+                    requested_day_index,
+                ]
+                == 1
+            )
+
+    # ------------------------------------------------------------
+    # Operational shifts and volunteer availability
+    # ------------------------------------------------------------
+
+    for volunteer_index, volunteer in enumerate(volunteers):
+        unavailable_periods = set(
+            volunteer.unavailable_periods
+        )
+
+        for day_index, day in enumerate(days):
+            for shift_index, shift in enumerate(real_shifts):
+                variable = assignment[
+                    volunteer_index,
+                    day_index,
+                    shift_index,
+                ]
+
+                if not _is_shift_operational(shift, day):
+                    model.add(variable == 0)
+                    continue
+
+                if shift.time_period in unavailable_periods:
+                    model.add(variable == 0)
+                    continue
+
+                # An off volunteer cannot work.
+                model.add(
+                    variable
+                    <= 1 - off[volunteer_index, day_index]
+                )
+
+    # ------------------------------------------------------------
+    # Every operational real shift receives exactly min_people
+    # ------------------------------------------------------------
+
+    for day_index, day in enumerate(days):
+        for shift_index, shift in enumerate(real_shifts):
+            shift_variables = [
+                assignment[
+                    volunteer_index,
+                    day_index,
+                    shift_index,
+                ]
+                for volunteer_index in volunteer_indexes
+            ]
+
+            if _is_shift_operational(shift, day):
+                model.add(
+                    sum(shift_variables) == shift.min_people
+                )
+            else:
+                model.add(sum(shift_variables) == 0)
+
+    # ------------------------------------------------------------
+    # One assignment per configured time period
+    # ------------------------------------------------------------
+
+    for volunteer_index in volunteer_indexes:
+        for day_index in day_indexes:
+            for period_index in period_indexes:
+                same_period_assignments = [
+                    assignment[
+                        volunteer_index,
+                        day_index,
+                        shift_index,
+                    ]
+                    for shift_index in (
+                        shift_indexes_by_period[period_index]
+                    )
+                ]
+
+                if period_index in required_joker_shifts:
+                    same_period_assignments.append(
+                        required_joker[
+                            volunteer_index,
+                            day_index,
+                            period_index,
+                        ]
+                    )
+
+                if same_period_assignments:
+                    model.add(
+                        sum(same_period_assignments) <= 1
+                    )
+
+    # ------------------------------------------------------------
+    # Required time periods
+    # ------------------------------------------------------------
+
+    for period_index, required_period in enumerate(time_periods):
+        if not required_period.required:
+            continue
+
+        period_shift_indexes = (
+            shift_indexes_by_period[period_index]
+        )
+
+        for day_index, day in enumerate(days):
+            operational_period_shift_indexes = [
+                shift_index
+                for shift_index in period_shift_indexes
+                if _is_shift_operational(
+                    real_shifts[shift_index],
+                    day,
+                )
+            ]
+
+            period_operates_on_day = bool(
+                operational_period_shift_indexes
+            )
+
+            for volunteer_index, volunteer in enumerate(volunteers):
+                joker_variable = required_joker[
+                    volunteer_index,
+                    day_index,
+                    period_index,
+                ]
+
+                if not period_operates_on_day:
+                    # Example: Late Morning on Sunday when Lunch is closed.
+                    model.add(joker_variable == 0)
+                    continue
+
+                if required_period in volunteer.unavailable_periods:
+                    # This volunteer is exempt from the required period.
+                    model.add(joker_variable == 0)
+                    continue
+
+                real_period_assignments = [
+                    assignment[
+                        volunteer_index,
+                        day_index,
+                        shift_index,
+                    ]
+                    for shift_index in (
+                        operational_period_shift_indexes
+                    )
+                ]
+
+                # If working, exactly one real or joker assignment in
+                # the required period. If off, zero.
+                model.add(
+                    sum(real_period_assignments)
+                    + joker_variable
+                    == 1 - off[volunteer_index, day_index]
+                )
+
+    # ------------------------------------------------------------
+    # Exact daily number of shifts
+    # ------------------------------------------------------------
+
+    for volunteer_index, volunteer in enumerate(volunteers):
+        for day_index in day_indexes:
+            daily_assignments = [
+                assignment[
+                    volunteer_index,
+                    day_index,
+                    shift_index,
+                ]
+                for shift_index in shift_indexes
+            ]
+
+            daily_assignments.extend(
+                required_joker[
+                    volunteer_index,
+                    day_index,
+                    period_index,
+                ]
+                for period_index in required_joker_shifts
+            )
+
+            daily_assignments.extend(
+                general_joker[
+                    volunteer_index,
+                    day_index,
+                    joker_index,
+                ]
+                for joker_index in general_joker_indexes
+            )
+
+            model.add(
+                sum(daily_assignments)
+                == volunteer.max_number_of_shifts
+                * (1 - off[volunteer_index, day_index])
+            )
+
+            # Explicitly prevent joker assignments on days off.
+            for joker_index in general_joker_indexes:
+                model.add(
+                    general_joker[
+                        volunteer_index,
+                        day_index,
+                        joker_index,
+                    ]
+                    <= 1 - off[volunteer_index, day_index]
+                )
+
+            for period_index in required_joker_shifts:
+                model.add(
+                    required_joker[
+                        volunteer_index,
+                        day_index,
+                        period_index,
+                    ]
+                    <= 1 - off[volunteer_index, day_index]
+                )
+
+    # ------------------------------------------------------------
+    # Lexicographic objective 1: maximize Sunday days off
+    # ------------------------------------------------------------
+
+    sunday_index = day_index_by_day[DayOfWeek.SUNDAY]
+
+    sunday_off_expression = sum(
+        off[volunteer_index, sunday_index]
+        for volunteer_index in volunteer_indexes
+    )
+
+    solver, best_sunday_off = _solve_optimization_stage(
+        model=model,
+        expression=sunday_off_expression,
+        maximize=True,
+        stage_name="maximizing Sunday days off",
+        configuration=configuration,
+    )
+
+    model.add(
+        sunday_off_expression == best_sunday_off
+    )
+
+    # ------------------------------------------------------------
+    # Lexicographic objective 2: balance weekday days off
+    # ------------------------------------------------------------
+
+    weekday_days = [
+        DayOfWeek.MONDAY,
+        DayOfWeek.TUESDAY,
+        DayOfWeek.WEDNESDAY,
+        DayOfWeek.THURSDAY,
+        DayOfWeek.FRIDAY,
+    ]
+
+    weekday_off_counts: list[Any] = []
+
+    for weekday in weekday_days:
+        day_index = day_index_by_day[weekday]
+
+        count_variable = model.new_int_var(
+            0,
+            len(volunteers),
+            f"off_count_{weekday.name.lower()}",
+        )
+
+        model.add(
+            count_variable
+            == sum(
+                off[volunteer_index, day_index]
+                for volunteer_index in volunteer_indexes
+            )
+        )
+
+        weekday_off_counts.append(count_variable)
+
+    maximum_weekday_off = model.new_int_var(
+        0,
+        len(volunteers),
+        "maximum_weekday_off",
+    )
+
+    minimum_weekday_off = model.new_int_var(
+        0,
+        len(volunteers),
+        "minimum_weekday_off",
+    )
+
+    model.add_max_equality(
+        maximum_weekday_off,
+        weekday_off_counts,
+    )
+
+    model.add_min_equality(
+        minimum_weekday_off,
+        weekday_off_counts,
+    )
+
+    weekday_imbalance = model.new_int_var(
+        0,
+        len(volunteers),
+        "weekday_off_imbalance",
+    )
+
+    model.add(
+        weekday_imbalance
+        == maximum_weekday_off - minimum_weekday_off
+    )
+
+    solver, best_weekday_imbalance = _solve_optimization_stage(
+        model=model,
+        expression=weekday_imbalance,
+        maximize=False,
+        stage_name="balancing Monday-Friday days off",
+        configuration=configuration,
+    )
+
+    model.add(
+        weekday_imbalance == best_weekday_imbalance
+    )
+
+    # ------------------------------------------------------------
+    # Lexicographic objective 3: minimize Saturday days off
+    # ------------------------------------------------------------
+
+    saturday_index = day_index_by_day[DayOfWeek.SATURDAY]
+
+    saturday_off_expression = sum(
+        off[volunteer_index, saturday_index]
+        for volunteer_index in volunteer_indexes
+    )
+
+    solver, best_saturday_off = _solve_optimization_stage(
+        model=model,
+        expression=saturday_off_expression,
+        maximize=False,
+        stage_name="minimizing Saturday days off",
+        configuration=configuration,
+    )
+
+    model.add(
+        saturday_off_expression == best_saturday_off
+    )
+
+    # ------------------------------------------------------------
+    # Lexicographic objective 4: maximize preferences
+    # ------------------------------------------------------------
+
+    preferred_assignment_variables: list[Any] = []
+
+    for volunteer_index, volunteer in enumerate(volunteers):
+        desired_work = set(volunteer.desired_work)
+
+        if not desired_work:
+            continue
+
+        for day_index in day_indexes:
+            for shift_index, shift in enumerate(real_shifts):
+                if shift.work_type in desired_work:
+                    preferred_assignment_variables.append(
+                        assignment[
+                            volunteer_index,
+                            day_index,
+                            shift_index,
+                        ]
+                    )
+
+    if preferred_assignment_variables:
+        preference_expression = sum(
+            preferred_assignment_variables
+        )
+
+        solver, best_preference_score = (
+            _solve_optimization_stage(
+                model=model,
+                expression=preference_expression,
+                maximize=True,
+                stage_name="maximizing volunteer preferences",
+                configuration=configuration,
+            )
+        )
+
+        model.add(
+            preference_expression == best_preference_score
+        )
+
+    # ------------------------------------------------------------
+    # Lexicographic objective 5: minimize general jokers
+    # ------------------------------------------------------------
+
+    general_joker_variables = list(
+        general_joker.values()
+    )
+
+    if general_joker_variables:
+        general_joker_expression = sum(
+            general_joker_variables
+        )
+
+        solver, best_general_joker_count = (
+            _solve_optimization_stage(
+                model=model,
+                expression=general_joker_expression,
+                maximize=False,
+                stage_name="minimizing unresolved joker assignments",
+                configuration=configuration,
+            )
+        )
+
+        model.add(
+            general_joker_expression
+            == best_general_joker_count
+        )
+
+    # Final solve with every selected objective value fixed.
+    model.minimize(0)
+
+    solver = _new_solver(configuration)
+    final_status = solver.solve(model)
+
+    if final_status not in {
+        cp_model.FEASIBLE,
+        cp_model.OPTIMAL,
+    }:
+        raise ScheduleGenerationError(
+            "The final constrained model could not be solved. "
+            f"Solver status: {_status_name(final_status)}."
+        )
+
+    # ------------------------------------------------------------
+    # Convert solver days off into new immutable Volunteer objects
+    # ------------------------------------------------------------
+
+    solved_volunteers: list[Volunteer] = []
+
+    for volunteer_index, volunteer in enumerate(volunteers):
+        solved_days_off = tuple(
+            day
+            for day_index, day in enumerate(days)
+            if solver.value(
+                off[volunteer_index, day_index]
+            )
+            == 1
+        )
+
+        solved_volunteer = volunteer.model_copy(
+            update={
+                "days_off": solved_days_off,
+            }
+        )
+
+        solved_volunteers.append(solved_volunteer)
+
+    # ------------------------------------------------------------
+    # Build the existing Schedule result
+    # ------------------------------------------------------------
+
+    generated_shifts = (
+        real_shifts
+        + list(required_joker_shifts.values())
+        + general_joker_shifts
+    )
+
+    schedule = Schedule(
+        shifts=generated_shifts,
+        vols=solved_volunteers,
+        time_periods=time_periods,
+    )
+
+    # Real shifts.
+    for volunteer_index, volunteer in enumerate(solved_volunteers):
+        for day_index, day in enumerate(days):
+            for shift_index, shift in enumerate(real_shifts):
+                if solver.value(
+                    assignment[
+                        volunteer_index,
+                        day_index,
+                        shift_index,
+                    ]
+                ) != 1:
+                    continue
+
+                schedule.assign(
+                    volunteer,
+                    day,
+                    shift,
+                    raise_on_error=True,
+                )
+
+    # Required-period jokers.
+    for volunteer_index, volunteer in enumerate(solved_volunteers):
+        for day_index, day in enumerate(days):
+            for period_index, joker_shift in (
+                required_joker_shifts.items()
+            ):
+                if solver.value(
+                    required_joker[
+                        volunteer_index,
+                        day_index,
+                        period_index,
+                    ]
+                ) != 1:
+                    continue
+
+                schedule.assign(
+                    volunteer,
+                    day,
+                    joker_shift,
+                    raise_on_error=True,
+                )
+
+    # General unresolved jokers.
+    for volunteer_index, volunteer in enumerate(solved_volunteers):
+        for day_index, day in enumerate(days):
+            for joker_index, joker_shift in enumerate(
+                general_joker_shifts
+            ):
+                if solver.value(
+                    general_joker[
+                        volunteer_index,
+                        day_index,
+                        joker_index,
+                    ]
+                ) != 1:
+                    continue
+
+                schedule.assign(
+                    volunteer,
+                    day,
+                    joker_shift,
+                    raise_on_error=True,
+                )
+
+    _validate_generated_schedule(
+        schedule=schedule,
+        volunteers=solved_volunteers,
+        real_shifts=real_shifts,
+        time_periods=time_periods,
+        required_joker_shifts=required_joker_shifts,
+    )
+
+    return schedule
+
+def _validate_generated_schedule(
+    *,
+    schedule: Schedule,
+    volunteers: list[Volunteer],
+    real_shifts: list[Shift],
+    time_periods: list[TimePeriod],
+    required_joker_shifts: dict[int, Shift],
+) -> None:
+    """
+    Validate the generated Schedule object after converting the CP-SAT
+    result.
+
+    This verifies the important business constraints without relying
+    solely on the solver model.
+
+    Validate:
+
+    Volunteer-wise:
+    [x] days off
+    [x] verify if all volunteers were assigned to their required num of shifts
+    [x] only one shift per time period
+    [x] volunteer available time periods
+    [x] Min people needed for the shift
+    [x] required time period
+    """
+
+    days = list(DayOfWeek)
+
+    for volunteer in volunteers:
+        # 1. check days off
+        if len(volunteer.days_off) != volunteer.max_days_off:
+            raise ScheduleGenerationError(
+                f"{volunteer.name!r} ended with "
+                f"{len(volunteer.days_off)} days off; expected "
+                f"{volunteer.max_days_off}."
+            )
+
+        for day in days:
+            assigned_shifts = schedule._vol_shifts_of_day(
+                volunteer,
+                day,
+            )
+
+            if day in volunteer.days_off:
+                if assigned_shifts:
+                    raise ScheduleGenerationError(
+                        f"{volunteer.name!r} has assignments on "
+                        f"their day off, {day.value}."
+                    )
+
+                continue
+
+            # 2. validate max number of shifts is met for day
+            if (
+                len(assigned_shifts)
+                != volunteer.max_number_of_shifts
+            ):
+                raise ScheduleGenerationError(
+                    f"{volunteer.name!r} has "
+                    f"{len(assigned_shifts)} assignments on "
+                    f"{day.value}; expected exactly "
+                    f"{volunteer.max_number_of_shifts}."
+                )
+
+            # 3. no more than 1 shift per time period
+            assigned_periods = [
+                shift.time_period
+                for shift in assigned_shifts
+            ]
+
+            if len(assigned_periods) != len(
+                set(assigned_periods)
+            ):
+                raise ScheduleGenerationError(
+                    f"{volunteer.name!r} has multiple assignments "
+                    f"in the same time period on {day.value}."
+                )
+
+            # 4. volunteer availability for time periods
+            for assigned_period in assigned_periods:
+                if assigned_period in volunteer.unavailable_periods:
+                    raise ScheduleGenerationError(
+                        f"{volunteer.name!r} is unavailable in "
+                        f"{assigned_period.name!r} on {day.value}."
+                    )
+
+    for day in days:
+        for shift in real_shifts:
+            # 5. min people for shift
+            assigned_count = len(
+                schedule._vols_in_shift(shift, day)
+            )
+
+            expected_count = (
+                shift.min_people
+                if _is_shift_operational(shift, day)
+                else 0
+            )
+
+            if assigned_count != expected_count:
+                raise ScheduleGenerationError(
+                    f"Shift {shift.name!r} has {assigned_count} "
+                    f"volunteers on {day.value}; expected "
+                    f"{expected_count}."
+                )
+
+    for period_index, period in enumerate(time_periods):
+        if not period.required:
+            continue
+
+        real_period_shifts = [
+            shift
+            for shift in real_shifts
+            if shift.time_period == period
+        ]
+
+        joker_shift = required_joker_shifts[period_index]
+
+        for day in days:
+            operational_period_shifts = [
+                shift
+                for shift in real_period_shifts
+                if _is_shift_operational(shift, day)
+            ]
+
+            if not operational_period_shifts:
+                continue
+
+            for volunteer in volunteers:
+                if day in volunteer.days_off:
+                    continue
+
+                if period in volunteer.unavailable_periods:
+                    continue
+
+                required_period_count = sum(
+                    1
+                    for shift in schedule._vol_shifts_of_day(
+                        volunteer,
+                        day,
+                    )
+                    if (
+                        shift.time_period == period
+                        and (
+                            shift in operational_period_shifts
+                            or shift == joker_shift
+                        )
+                    )
+                )
+
+                if required_period_count != 1:
+                    raise ScheduleGenerationError(
+                        f"{volunteer.name!r} has "
+                        f"{required_period_count} assignments in "
+                        f"required period {period.name!r} on "
+                        f"{day.value}; expected exactly one."
+                    )
