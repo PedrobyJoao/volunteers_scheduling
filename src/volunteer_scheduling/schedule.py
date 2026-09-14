@@ -596,7 +596,7 @@ def _create_required_joker_shifts(
             continue
 
         required_jokers[time_period_index] = Shift(
-            name=f"Others — {time_period.name}",
+            name=f"Others (Agriculture, Construction, arts...)",
             time_period=time_period,
             work_type=WorkType.others,
             min_people=0,
@@ -634,7 +634,7 @@ def _create_general_joker_shifts(
         slot_number = slot_index + 1
 
         synthetic_period = TimePeriod(
-            name=f"Unassigned joker slot {slot_number}",
+            name=f"Unassigned joker shift {slot_number}",
             start=time(0, 0),
             end=time(0, 0),
             required=False,
@@ -642,7 +642,7 @@ def _create_general_joker_shifts(
 
         joker_shifts.append(
             Shift(
-                name=f"Others — unassigned slot {slot_number}",
+                name=f"Others — unassigned shift {slot_number}",
                 time_period=synthetic_period,
                 work_type=WorkType.others,
                 min_people=0,
@@ -680,8 +680,8 @@ def generate_schedule(
 
     Lexicographic objectives:
       1. Maximize Sunday days off.
-      2. Balance Monday-Friday days off.
-      3. Minimize Saturday days off.
+      2. Balance Monday-Thursday and Saturday days off.
+      3. Minimize Friday days off.
       4. Maximize preferred real-shift assignments.
       5. Minimize general unresolved joker assignments.
     """
@@ -1047,6 +1047,7 @@ def generate_schedule(
 
     # ------------------------------------------------------------
     # Lexicographic objective 2: balance weekday days off
+    # excluding Friday, including Saturday!!!
     # ------------------------------------------------------------
 
     weekday_days = [
@@ -1054,7 +1055,7 @@ def generate_schedule(
         DayOfWeek.TUESDAY,
         DayOfWeek.WEDNESDAY,
         DayOfWeek.THURSDAY,
-        DayOfWeek.FRIDAY,
+        DayOfWeek.SATURDAY,
     ]
 
     weekday_off_counts: list[Any] = []
@@ -1115,7 +1116,7 @@ def generate_schedule(
         model=model,
         expression=weekday_imbalance,
         maximize=False,
-        stage_name="balancing Monday-Friday days off",
+        stage_name="balancing Monday-Thursday+Saturday days off",
         configuration=configuration,
     )
 
@@ -1124,26 +1125,26 @@ def generate_schedule(
     )
 
     # ------------------------------------------------------------
-    # Lexicographic objective 3: minimize Saturday days off
+    # Lexicographic objective 3: minimize Friday days off
     # ------------------------------------------------------------
 
-    saturday_index = day_index_by_day[DayOfWeek.SATURDAY]
+    friday_index = day_index_by_day[DayOfWeek.FRIDAY]
 
-    saturday_off_expression = sum(
-        off[volunteer_index, saturday_index]
+    friday_off_expression = sum(
+        off[volunteer_index, friday_index]
         for volunteer_index in volunteer_indexes
     )
 
-    solver, best_saturday_off = _solve_optimization_stage(
+    solver, best_friday_off = _solve_optimization_stage(
         model=model,
-        expression=saturday_off_expression,
+        expression=friday_off_expression,
         maximize=False,
-        stage_name="minimizing Saturday days off",
+        stage_name="minimizing friday_days off",
         configuration=configuration,
     )
 
     model.add(
-        saturday_off_expression == best_saturday_off
+        friday_off_expression == best_friday_off
     )
 
     # ------------------------------------------------------------
