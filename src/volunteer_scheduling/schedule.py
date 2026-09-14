@@ -1,6 +1,5 @@
 """
 TODOs:
-[] test prefered shifts
 [] warning when typos, wrong fields in yaml
 
 DONE:
