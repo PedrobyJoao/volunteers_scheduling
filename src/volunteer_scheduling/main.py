@@ -1,11 +1,11 @@
-from . import schedule_2
+from . import schedule
 from . import sheets
 from . import parser
 
 
 def main():
-    obj = parser.parse("data.yml")
-    week_schedule = schedule_2.generate_schedule(obj.shifts, obj.volunteers, obj.time_periods)
+    obj = parser.parse("real_data.yml")
+    week_schedule = schedule.generate_schedule(obj.shifts, obj.volunteers, obj.time_periods)
     week_schedule.pretty_print()
     print()
     week_schedule.pretty_days_off()

@@ -37,13 +37,13 @@ shifts:
 
   - name: Watering
     time_period: Early Morning
-    work_type: "Outdoor"
+    work_type: "Others"
     min_people: 1
 
   - name: Chickens
     time_period: Early Morning
     min_people: 1
-    work_type: "Outdoor"
+    work_type: "Others"
 
 volunteers:
   - name: Carol
@@ -75,7 +75,7 @@ volunteers:
   - name: Carlo
   - name: Marco
   - name: Aristoteles
-    desired_work: ["Outdoor"]
+    desired_work: ["Others"]
   - name: Platao
   - name: Socrates
   - name: Ada Lovelace

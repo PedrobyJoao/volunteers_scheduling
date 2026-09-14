@@ -3,14 +3,14 @@ YAML parser
 """
 
 import yaml
-from . import schedule_2
+from . import schedule
 
-def parse(path: str) -> schedule_2.ShiftsVolunteersYAML:
+def parse(path: str) -> schedule.ShiftsVolunteersYAML:
     with open(path) as f:
         data = yaml.safe_load(f)
 
     periods = [
-        schedule_2.TimePeriod(**p)
+        schedule.TimePeriod(**p)
         for p in data.get("time_periods", [])
     ]
 
@@ -29,10 +29,10 @@ def parse(path: str) -> schedule_2.ShiftsVolunteersYAML:
             raise ValueError(f"Unknown time_period: {tp_name}")
 
         shifts.append(
-            schedule_2.Shift(
+            schedule.Shift(
                 name=s["name"],
                 time_period=period_map[tp_name_clean],
-                work_type=s.get("work_type", schedule_2.WorkType.others),
+                work_type=s.get("work_type", schedule.WorkType.others),
                 min_people=s.get("min_people", 1),
                 max_people=s.get("max_people", 5),
                 unoperational_days=s.get("unoperational_days", ()),
@@ -60,10 +60,10 @@ def parse(path: str) -> schedule_2.ShiftsVolunteersYAML:
         volunteer_data["unavailable_periods"] = tuple(unavailable_periods)
 
         volunteers.append(
-            schedule_2.Volunteer(**volunteer_data)
+            schedule.Volunteer(**volunteer_data)
         )
 
-    return schedule_2.ShiftsVolunteersYAML(
+    return schedule.ShiftsVolunteersYAML(
         time_periods=periods,
         shifts=shifts,
         volunteers=volunteers,
